@@ -746,15 +746,19 @@ class CoreTest {
             """{"sessionId": "$sid", "type": "user", "uuid": "u1", "timestamp": "2026-11-18T09:00:00.000Z", """ +
                 """"message": {"role": "user", "content": [{"type": "image", "source": {}}]}}""" + "\n",
         )
-        val index = SessionIndex()
-        withLocale(java.util.Locale.of("ru")) {
-            assertEquals("[изображение]", index.scan(listOf(dir)).single().firstPrompt)
-        }
-        withLocale(java.util.Locale.ROOT) {
-            // файл не менялся — сводка из кеша, на старом языке
-            assertEquals("[изображение]", index.scan(listOf(dir)).single().firstPrompt)
-            index.clear()
-            assertEquals("[image]", index.scan(listOf(dir)).single().firstPrompt)
+        try {
+            val index = SessionIndex()
+            withLocale(java.util.Locale.of("ru")) {
+                assertEquals("[изображение]", index.scan(listOf(dir)).single().firstPrompt)
+            }
+            withLocale(java.util.Locale.ROOT) {
+                // файл не менялся — сводка из кеша, на старом языке
+                assertEquals("[изображение]", index.scan(listOf(dir)).single().firstPrompt)
+                index.clear()
+                assertEquals("[image]", index.scan(listOf(dir)).single().firstPrompt)
+            }
+        } finally {
+            dir.toFile().deleteRecursively()
         }
     }
 }
