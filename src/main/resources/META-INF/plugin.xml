@@ -18,7 +18,8 @@
       <li>Archive and Rename append a title record to the session transcript, in the same format Claude Code <code>/rename</code> and JetBrains Air use.</li>
       <li>Delete permanently removes the session transcript and its service files.</li>
     </ul>
-    <p>Nothing is sent over the network. Requires Claude Code CLI. The plugin UI is in Russian.</p>
+    <p>Nothing is sent over the network. Requires Claude Code CLI.</p>
+    <p>The UI is available in English and Russian: it follows the IDE language and can be switched in Settings → Tools → CC Sessions.</p>
     <p>Unofficial plugin, not affiliated with Anthropic.</p>
     <hr/>
     <p>Менеджер сессий Claude Code вокруг настоящего CLI.</p>
@@ -29,10 +30,15 @@
       <li>Просмотр транскрипта: Markdown, свёрнутые вызовы инструментов, diff правок, переход к файлам, экспорт в Markdown.</li>
       <li>Архив и удаление сессий; архив общий с JetBrains Air.</li>
     </ul>
+    <p>Интерфейс доступен на английском и русском: язык следует языку IDE и переключается в Settings → Tools → CC Sessions.</p>
     <p>Неофициальный плагин, не связан с Anthropic.</p>
     ]]></description>
 
     <change-notes><![CDATA[
+    <p><b>1.1.0</b></p>
+    <ul>
+      <li>English UI; the language follows the IDE and can be set in Settings → Tools → CC Sessions.</li>
+    </ul>
     <p><b>1.0.2</b></p>
     <ul>
       <li>The tool window and the Tools menu group are now called <b>CC Sessions</b>, same as the plugin; the window header says it is about Claude Code sessions.</li>
