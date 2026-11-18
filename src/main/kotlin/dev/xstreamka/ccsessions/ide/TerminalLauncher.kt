@@ -65,7 +65,7 @@ class TerminalLauncher(private val project: Project) {
         val args = mutableListOf("--session-id", id)
         if (!name.isNullOrBlank()) args += listOf("-n", name.trim())
         val cmd = Shell.claude(st.claudeCommand.orEmpty(), st.newSessionArgs.orEmpty(), args)
-        launch(id, project.basePath, tabTitle(name?.takeIf { it.isNotBlank() } ?: "новая сессия"), cmd)
+        launch(id, project.basePath, tabTitle(name?.takeIf { it.isNotBlank() } ?: CcBundle.message("terminal.newSession")), cmd)
     }
 
     /** Выполнить [text] (например, «/rename имя») во вкладке сессии, открытой плагином. false — такой вкладки нет. */
@@ -164,8 +164,8 @@ class TerminalLauncher(private val project: Project) {
                 thisLogger().warn("cannot open terminal tab", e)
                 CopyPasteManager.getInstance().setContents(StringSelection(command))
                 CcData.notify(
-                    project, "Не удалось открыть вкладку терминала",
-                    "Команда скопирована в буфер обмена: <code>${StringUtil.escapeXmlEntities(command)}</code>", NotificationType.WARNING,
+                    project, CcBundle.message("notify.terminalFailed.title"),
+                    CcBundle.message("notify.terminalFailed.content", StringUtil.escapeXmlEntities(command)), NotificationType.WARNING,
                 )
             }
         }

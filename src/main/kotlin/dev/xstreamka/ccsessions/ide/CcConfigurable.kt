@@ -23,51 +23,48 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
                     .bindItem({ s.uiLanguage?.takeIf { it in languages } ?: CcLanguage.AUTO }, { s.uiLanguage = it ?: CcLanguage.AUTO })
                     .comment(CcBundle.message("settings.language.comment"))
             }
-            group("Запуск Claude Code") {
-                row("Команда:") {
+            group(CcBundle.message("settings.group.launch")) {
+                row(CcBundle.message("settings.command")) {
                     textField()
                         .bindText({ s.claudeCommand.orEmpty() }, { s.claudeCommand = it.ifBlank { "claude" } })
                         .columns(COLUMNS_LARGE)
-                        .comment("Например <code>claude</code>, полный путь (<code>~/.npm-global/bin/claude</code>) или <code>npx @anthropic-ai/claude-code</code>")
+                        .comment(CcBundle.message("settings.command.comment"))
                 }
-                row("Аргументы новой сессии:") {
+                row(CcBundle.message("settings.newSessionArgs")) {
                     textField().bindText({ s.newSessionArgs.orEmpty() }, { s.newSessionArgs = it }).columns(COLUMNS_LARGE)
                 }
-                row("Аргументы resume / fork:") {
+                row(CcBundle.message("settings.resumeArgs")) {
                     textField().bindText({ s.resumeArgs.orEmpty() }, { s.resumeArgs = it }).columns(COLUMNS_LARGE)
-                        .comment("Claude Code не восстанавливает bypassPermissions при resume. Если он нужен — добавьте <code>--permission-mode bypassPermissions</code> или задайте <code>permissions.defaultMode</code> в settings.json")
+                        .comment(CcBundle.message("settings.resumeArgs.comment"))
                 }
                 row {
-                    checkBox("Открывать сессию вкладкой в редакторе (рядом с файлами)").bindSelected(s::openInEditor)
-                        .comment("Выключено — во вкладке окна Terminal")
+                    checkBox(CcBundle.message("settings.openInEditor")).bindSelected(s::openInEditor)
+                        .comment(CcBundle.message("settings.openInEditor.comment"))
                 }
             }
-            group("Список сессий") {
-                row { checkBox("Скрывать сессии, созданные через SDK / claude -p").bindSelected(s::hideSdkSessions) }
+            group(CcBundle.message("settings.group.list")) {
+                row { checkBox(CcBundle.message("settings.hideSdk")).bindSelected(s::hideSdkSessions) }
             }
-            group("Уведомления (нужен live-статус)") {
-                row { checkBox("Claude закончил ход").bindSelected(s::notifyOnIdle) }
-                row { checkBox("Claude ждёт разрешения").bindSelected(s::notifyOnPermission) }
-                row { checkBox("Только когда окно IDE не в фокусе").bindSelected(s::notifyOnlyWhenInactive) }
+            group(CcBundle.message("settings.group.notifications")) {
+                row { checkBox(CcBundle.message("settings.notify.idle")).bindSelected(s::notifyOnIdle) }
+                row { checkBox(CcBundle.message("settings.notify.permission")).bindSelected(s::notifyOnPermission) }
+                row { checkBox(CcBundle.message("settings.notify.inactive")).bindSelected(s::notifyOnlyWhenInactive) }
             }
-            group("Live-статус") {
+            group(CcBundle.message("settings.group.live")) {
                 row {
-                    comment(
-                        "Асинхронный хук <code>cc-sessions-hook</code> пишет короткие события сессий в " +
-                            "<code>${CcData.paths.eventsDir}</code>. Он не блокирует Claude Code и не влияет на ваши хуки.",
-                    )
+                    comment(CcBundle.message("settings.live.comment", CcData.paths.eventsDir.toString()))
                 }
-                row("Каталог бэкапов settings.json:") {
+                row(CcBundle.message("settings.backupDir")) {
                     textField()
                         .bindText({ s.settingsBackupDir.orEmpty() }, { s.settingsBackupDir = it.trim() })
                         .columns(COLUMNS_LARGE)
-                        .comment("Перед изменением <code>${CcData.paths.settingsFile}</code> сюда кладётся его копия. Пусто — рядом с settings.json")
+                        .comment(CcBundle.message("settings.backupDir.comment", CcData.paths.settingsFile.toString()))
                 }
                 row {
                     val installed = HookInstaller.isInstalled()
-                    label(if (installed) "Статус: установлен ✓" else "Статус: не установлен")
-                    button(if (installed) "Переустановить" else "Установить") { HookInstaller.install(currentProject()) }
-                    button("Удалить") { HookInstaller.uninstall(currentProject()) }
+                    label(CcBundle.message(if (installed) "settings.hook.installed" else "settings.hook.notInstalled"))
+                    button(CcBundle.message(if (installed) "settings.hook.reinstall" else "button.install")) { HookInstaller.install(currentProject()) }
+                    button(CcBundle.message("settings.hook.remove")) { HookInstaller.uninstall(currentProject()) }
                 }
             }
         }

@@ -77,16 +77,14 @@
     </extensions>
 
     <actions>
-        <group id="CcSessions.ToolsMenu" text="CC Sessions" popup="true">
+        <group id="CcSessions.ToolsMenu" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="CcSessions.NewSession"
-                    class="dev.xstreamka.ccsessions.ide.SessionActions$NewSession"
-                    text="Новая сессия Claude Code">
+                    class="dev.xstreamka.ccsessions.ide.SessionActions$NewSession">
                 <keyboard-shortcut keymap="$default" first-keystroke="control alt shift C"/>
             </action>
             <action id="CcSessions.InstallHooks"
-                    class="dev.xstreamka.ccsessions.ide.SessionActions$InstallHooks"
-                    text="Live-статус…"/>
+                    class="dev.xstreamka.ccsessions.ide.SessionActions$InstallHooks"/>
         </group>
     </actions>
 </idea-plugin>

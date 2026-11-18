@@ -33,6 +33,15 @@ class SessionsService(private val project: Project) : Disposable {
     private var lastSizes: Map<String, Long> = emptyMap()
     private var lastMetaStamp = -1L
 
+    init {
+        // Смена языка плагина: в кешированных сводках остались тексты старого языка — перечитываем транскрипты
+        ApplicationManager.getApplication().messageBus.connect(this)
+            .subscribe(CcLanguageListener.TOPIC, CcLanguageListener {
+                index.clear()
+                requestRefresh()
+            })
+    }
+
     fun ensureStarted() {
         if (future != null) return
         synchronized(this) {

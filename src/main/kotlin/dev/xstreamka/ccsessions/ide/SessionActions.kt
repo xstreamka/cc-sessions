@@ -3,6 +3,7 @@ package dev.xstreamka.ccsessions.ide
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserFactory
@@ -20,6 +21,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.openapi.diagnostic.thisLogger
 import dev.xstreamka.ccsessions.core.AirArchive
+import dev.xstreamka.ccsessions.core.I18n
 import dev.xstreamka.ccsessions.core.LiveStatus
 import dev.xstreamka.ccsessions.core.MarkdownExport
 import dev.xstreamka.ccsessions.core.SessionFiles
@@ -27,10 +29,26 @@ import dev.xstreamka.ccsessions.core.SessionMeta
 import dev.xstreamka.ccsessions.core.SessionSummary
 import dev.xstreamka.ccsessions.core.Shell
 import dev.xstreamka.ccsessions.core.TranscriptParser
+import org.jetbrains.annotations.PropertyKey
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
+import java.util.function.Supplier
+import javax.swing.Icon
 
 object SessionActions {
+
+    /** Текст из бандла, который вычисляется при каждом показе — следует настройке языка плагина без перезапуска. */
+    private fun message(@PropertyKey(resourceBundle = I18n.BUNDLE) key: String?): Supplier<String?> =
+        Supplier { key?.let { CcBundle.message(it) } }
+
+    /** Текст и описание действия в текущем языке плагина (из update(): шаблон действия сам не перечитывается). */
+    private fun Presentation.setTexts(
+        @PropertyKey(resourceBundle = I18n.BUNDLE) textKey: String,
+        @PropertyKey(resourceBundle = I18n.BUNDLE) descriptionKey: String? = null,
+    ) {
+        text = CcBundle.message(textKey)
+        if (descriptionKey != null) description = CcBundle.message(descriptionKey)
+    }
 
     /** Новая сессия сразу, без вопроса об имени (назвать можно потом через «Переименовать…»). */
     fun startNew(project: Project) {
@@ -45,7 +63,7 @@ object SessionActions {
     fun archive(project: Project, row: SessionRow) {
         if (row.liveStatus?.active == true) {
             val answer = Messages.showYesNoDialog(
-                project, "Сессия сейчас работает. Завершить её и закрыть вкладку терминала?", "Завершить сессию", null,
+                project, CcBundle.message("dialog.archiveRunning.message"), CcBundle.message("dialog.archiveRunning.title"), null,
             )
             if (answer != Messages.YES) return
         }
@@ -83,10 +101,14 @@ object SessionActions {
     }
 
     /** Базовый класс для действий над выбранной сессией. */
-    abstract class RowAction(text: String, description: String? = null, icon: javax.swing.Icon? = null) :
-        DumbAwareAction(text, description, icon) {
+    abstract class RowAction(
+        @PropertyKey(resourceBundle = I18n.BUNDLE) private val textKey: String,
+        @PropertyKey(resourceBundle = I18n.BUNDLE) private val descriptionKey: String? = null,
+        icon: Icon? = null,
+    ) : DumbAwareAction(message(textKey), message(descriptionKey), icon) {
         override fun getActionUpdateThread() = ActionUpdateThread.BGT
         override fun update(e: AnActionEvent) {
+            e.presentation.setTexts(textKey, descriptionKey)
             e.presentation.isEnabled = e.project != null && e.getData(SessionRow.KEY) != null
         }
 
@@ -113,10 +135,14 @@ object SessionActions {
         if (st != null && st.active) {
             val choice = Messages.showDialog(
                 project,
-                "Похоже, эта сессия сейчас работает в другом терминале (${row.live?.describe()}).\n" +
-                    "Если продолжить её второй раз, сообщения из двух процессов перемешаются в одном транскрипте.",
-                "Сессия уже активна",
-                arrayOf("Ответвить копию", "Всё равно продолжить", "Отмена"), 0, Messages.getWarningIcon(),
+                CcBundle.message("dialog.alreadyActive.message", row.live?.describe().toString()),
+                CcBundle.message("dialog.alreadyActive.title"),
+                arrayOf(
+                    CcBundle.message("dialog.alreadyActive.fork"),
+                    CcBundle.message("dialog.alreadyActive.resumeAnyway"),
+                    CcBundle.message("button.cancel"),
+                ),
+                0, Messages.getWarningIcon(),
             )
             return when (choice) {
                 0 -> {
@@ -139,20 +165,20 @@ object SessionActions {
 
     /** [closeTranscript] — действие на тулбаре транскрипта: открыв сессию, закрыть вкладку транскрипта. */
     class Resume(private val closeTranscript: Boolean = false) :
-        RowAction("Продолжить", "claude --resume в терминале IDE", AllIcons.Actions.Execute) {
+        RowAction("cc.action.resume", "cc.action.resume.description", AllIcons.Actions.Execute) {
         override fun perform(project: Project, row: SessionRow) {
             if (resume(project, row) && closeTranscript) TranscriptEditorProvider.close(project, row.id)
         }
     }
 
-    class Fork : RowAction("Ответвить (fork)", "Новая сессия с копией истории; оригинал не меняется", AllIcons.Vcs.Branch) {
+    class Fork : RowAction("cc.action.fork", "cc.action.fork.description", AllIcons.Vcs.Branch) {
         override fun perform(project: Project, row: SessionRow) {
             TerminalLauncher.get(project).fork(row.summary, row.meta.alias)
             SessionsService.get(project).requestRefresh()
         }
     }
 
-    class OpenTranscript : RowAction("Открыть транскрипт", null, AllIcons.Actions.Preview) {
+    class OpenTranscript : RowAction("cc.action.openTranscript", null, AllIcons.Actions.Preview) {
         override fun perform(project: Project, row: SessionRow) = TranscriptEditorProvider.open(project, row.id)
     }
 
@@ -161,18 +187,18 @@ object SessionActions {
      * Открыта во вкладке плагина — отправляем туда /rename (работающий claude сам переписывает название
      * и затёр бы запись в транскрипте); не запущена — дописываем имя в транскрипт, как /rename и Air.
      */
-    class Rename : RowAction("Переименовать…", "Имя сессии в Claude Code (claude --resume <имя>), Air и списке", AllIcons.Actions.Edit) {
+    class Rename : RowAction("cc.action.rename", "cc.action.rename.description", AllIcons.Actions.Edit) {
         override fun perform(project: Project, row: SessionRow) {
             val launcher = TerminalLauncher.get(project)
             if (row.liveStatus?.active == true && !launcher.hasOpenTab(row.id)) {
                 Messages.showInfoMessage(
-                    project, "Сессия работает в другом терминале — переименуйте её там командой /rename <имя>.", "Переименовать сессию",
+                    project, CcBundle.message("dialog.rename.otherTerminal"), CcBundle.message("dialog.rename.title"),
                 )
                 return
             }
             val input = Messages.showInputDialog(
-                project, "Имя сессии — его увидят Claude Code (claude --resume <имя>) и Air:",
-                "Переименовать сессию", null, row.displayTitle, null,
+                project, CcBundle.message("dialog.rename.message"),
+                CcBundle.message("dialog.rename.title"), null, row.displayTitle, null,
             ) ?: return
             val name = SessionSummary.oneLine(input, 200)
             val service = SessionsService.get(project)
@@ -202,11 +228,11 @@ object SessionActions {
         }
     }
 
-    class ToggleFavorite : RowAction("В избранное / из избранного", null, AllIcons.Nodes.Favorite) {
+    class ToggleFavorite : RowAction("cc.action.favorite", null, AllIcons.Nodes.Favorite) {
         override fun update(e: AnActionEvent) {
             super.update(e)
             val fav = e.getData(SessionRow.KEY)?.meta?.favorite == true
-            e.presentation.text = if (fav) "Убрать из избранного" else "В избранное"
+            e.presentation.text = CcBundle.message(if (fav) "cc.action.favorite.remove" else "cc.action.favorite.add")
         }
 
         override fun perform(project: Project, row: SessionRow) {
@@ -214,11 +240,11 @@ object SessionActions {
         }
     }
 
-    class ToggleArchive : RowAction("Завершить (в архив)", null, AllIcons.Actions.Checked) {
+    class ToggleArchive : RowAction("cc.action.archive", null, AllIcons.Actions.Checked) {
         override fun update(e: AnActionEvent) {
             super.update(e)
             val row = e.getData(SessionRow.KEY)
-            e.presentation.text = if (row?.archived == true) "Вернуть из архива" else "Завершить (в архив)"
+            e.presentation.text = CcBundle.message(if (row?.archived == true) "cc.action.unarchive" else "cc.action.archive")
         }
 
         override fun perform(project: Project, row: SessionRow) {
@@ -228,18 +254,18 @@ object SessionActions {
     }
 
     /** Удалить сессию навсегда: транскрипт и все её служебные файлы (см. [SessionFiles]). */
-    class DeleteSession : RowAction("Удалить сессию…", "Удалить транскрипт и служебные файлы сессии навсегда", AllIcons.General.Delete) {
+    class DeleteSession : RowAction("cc.action.delete", "cc.action.delete.description", AllIcons.General.Delete) {
         override fun perform(project: Project, row: SessionRow) {
             if (row.liveStatus?.active == true || TerminalLauncher.get(project).hasOpenTab(row.id)) {
                 Messages.showWarningDialog(
-                    project, "Сессия сейчас работает или открыта во вкладке терминала. Сначала завершите её.", "Удалить сессию",
+                    project, CcBundle.message("dialog.delete.busy"), CcBundle.message("dialog.delete.title"),
                 )
                 return
             }
             val paths = CcData.paths
             val files = SessionFiles.of(paths, row.id, row.summary.file)
             if (files.isEmpty()) {
-                Messages.showInfoMessage(project, "Файлы этой сессии не найдены.", "Удалить сессию")
+                Messages.showInfoMessage(project, CcBundle.message("dialog.delete.noFiles"), CcBundle.message("dialog.delete.title"))
                 return
             }
             val base = paths.configDir.toString().replaceFirst(System.getProperty("user.home"), "~")
@@ -247,8 +273,9 @@ object SessionActions {
             val size = StringUtil.formatFileSize(SessionFiles.sizeOf(files))
             val answer = Messages.showOkCancelDialog(
                 project,
-                "Удалить сессию «${row.displayTitle}» навсегда?\n\nБудут удалены ($size):\n$list\n\nОтменить удаление нельзя.",
-                "Удалить сессию", "Удалить", "Отмена", Messages.getWarningIcon(),
+                CcBundle.message("dialog.delete.message", row.displayTitle, size, list),
+                CcBundle.message("dialog.delete.title"), CcBundle.message("button.delete"), CcBundle.message("button.cancel"),
+                Messages.getWarningIcon(),
             )
             if (answer != Messages.OK) return
             TranscriptEditorProvider.close(project, row.id)
@@ -258,17 +285,17 @@ object SessionActions {
                     CcData.meta.update(row.id) { SessionMeta() }
                 } catch (e: Exception) {
                     thisLogger().warn("cannot delete session ${row.id}", e)
-                    CcData.notify(project, "Не удалось удалить сессию", e.message ?: e.javaClass.simpleName, NotificationType.ERROR)
+                    CcData.notify(project, CcBundle.message("notify.deleteFailed"), e.message ?: e.javaClass.simpleName, NotificationType.ERROR)
                 }
                 SessionsService.get(project).requestRefresh()
             }
         }
     }
 
-    class EditTags : RowAction("Теги…") {
+    class EditTags : RowAction("cc.action.tags") {
         override fun perform(project: Project, row: SessionRow) {
             val text = Messages.showInputDialog(
-                project, "Теги через пробел или запятую (поиск: #тег):", "Теги сессии", null,
+                project, CcBundle.message("dialog.tags.message"), CcBundle.message("dialog.tags.title"), null,
                 row.meta.tags.joinToString(" "), null,
             ) ?: return
             val tags = text.split(Regex("[\\s,]+")).map { it.trim().removePrefix("#") }.filter { it.isNotEmpty() }.distinct()
@@ -276,12 +303,12 @@ object SessionActions {
         }
     }
 
-    class CopyId : RowAction("Копировать ID", null, AllIcons.Actions.Copy) {
+    class CopyId : RowAction("cc.action.copyId", null, AllIcons.Actions.Copy) {
         override fun perform(project: Project, row: SessionRow) =
             CopyPasteManager.getInstance().setContents(StringSelection(row.id))
     }
 
-    class CopyResumeCommand : RowAction("Копировать команду resume") {
+    class CopyResumeCommand : RowAction("cc.action.copyResumeCommand") {
         override fun perform(project: Project, row: SessionRow) {
             val st = CcSettings.get()
             val cd = row.summary.cwd?.let { "cd " + Shell.quote(it) + " && " }.orEmpty()
@@ -290,10 +317,10 @@ object SessionActions {
         }
     }
 
-    class ExportMarkdown : RowAction("Экспорт в Markdown…", null, AllIcons.ToolbarDecorator.Export) {
+    class ExportMarkdown : RowAction("cc.action.exportMarkdown", null, AllIcons.ToolbarDecorator.Export) {
         override fun perform(project: Project, row: SessionRow) {
             val file = row.summary.file ?: return
-            val descriptor = FileSaverDescriptor("Экспорт транскрипта", "Сохранить сессию в Markdown", "md")
+            val descriptor = FileSaverDescriptor(CcBundle.message("dialog.export.title"), CcBundle.message("dialog.export.description"), "md")
             val base = project.basePath?.let { LocalFileSystem.getInstance().findFileByPath(it) }
             val safe = row.displayTitle.replace(Regex("[^\\p{L}\\p{N}._ -]"), "").take(60).trim().ifEmpty { row.id.take(8) }
             val target = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project).save(base, "$safe.md") ?: return
@@ -309,7 +336,7 @@ object SessionActions {
         }
     }
 
-    class OpenRawJsonl : RowAction("Открыть исходный .jsonl") {
+    class OpenRawJsonl : RowAction("cc.action.openRawJsonl") {
         override fun perform(project: Project, row: SessionRow) {
             val f = row.summary.file ?: return
             val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(f) ?: return
@@ -319,22 +346,44 @@ object SessionActions {
 
     // ---------------- тулбар ----------------
 
-    class NewSession : DumbAwareAction("Новая сессия", "Запустить claude в терминале IDE", AllIcons.General.Add) {
+    /**
+     * Новая сессия. Без аргумента — экземпляр из plugin.xml (меню Tools: «Новая сессия Claude Code»),
+     * на тулбаре панели — короткий текст [textKey].
+     */
+    class NewSession(@PropertyKey(resourceBundle = I18n.BUNDLE) private val textKey: String = "action.CcSessions.NewSession.text") :
+        DumbAwareAction(message(textKey), message(DESCRIPTION), AllIcons.General.Add) {
         override fun getActionUpdateThread() = ActionUpdateThread.BGT
+        override fun update(e: AnActionEvent) = e.presentation.setTexts(textKey, DESCRIPTION)
+
         override fun actionPerformed(e: AnActionEvent) {
             startNew(e.project ?: return)
         }
+
+        private companion object {
+            const val DESCRIPTION = "action.CcSessions.NewSession.description"
+        }
     }
 
-    class Refresh : DumbAwareAction("Обновить", null, AllIcons.Actions.Refresh) {
+    class Refresh : DumbAwareAction(message("cc.action.refresh"), AllIcons.Actions.Refresh) {
         override fun getActionUpdateThread() = ActionUpdateThread.BGT
+        override fun update(e: AnActionEvent) = e.presentation.setTexts("cc.action.refresh")
+
         override fun actionPerformed(e: AnActionEvent) {
             SessionsService.get(e.project ?: return).requestRefresh()
         }
     }
 
-    class ToggleAllProjects : ToggleAction("Сессии всех проектов", null, AllIcons.Nodes.ModuleGroup) {
+    /** Переключатель на тулбаре панели; текст — из бандла в текущем языке плагина. */
+    abstract class KeyedToggle(@PropertyKey(resourceBundle = I18n.BUNDLE) private val textKey: String, icon: Icon) :
+        ToggleAction(message(textKey), icon) {
         override fun getActionUpdateThread() = ActionUpdateThread.BGT
+        override fun update(e: AnActionEvent) {
+            super.update(e)
+            e.presentation.setTexts(textKey)
+        }
+    }
+
+    class ToggleAllProjects : KeyedToggle("cc.action.allProjects", AllIcons.Nodes.ModuleGroup) {
         override fun isSelected(e: AnActionEvent) = CcSettings.get().showAllProjects
         override fun setSelected(e: AnActionEvent, state: Boolean) {
             CcSettings.get().showAllProjects = state
@@ -342,8 +391,7 @@ object SessionActions {
         }
     }
 
-    class ToggleFavoritesOnly : ToggleAction("Только избранное", null, AllIcons.Nodes.Favorite) {
-        override fun getActionUpdateThread() = ActionUpdateThread.BGT
+    class ToggleFavoritesOnly : KeyedToggle("cc.action.favoritesOnly", AllIcons.Nodes.Favorite) {
         override fun isSelected(e: AnActionEvent) = CcSettings.get().favoritesOnly
         override fun setSelected(e: AnActionEvent, state: Boolean) {
             CcSettings.get().favoritesOnly = state
@@ -351,8 +399,7 @@ object SessionActions {
         }
     }
 
-    class ToggleGroupByDay : ToggleAction("Группировать по дням", null, AllIcons.Actions.GroupBy) {
-        override fun getActionUpdateThread() = ActionUpdateThread.BGT
+    class ToggleGroupByDay : KeyedToggle("cc.action.groupByDay", AllIcons.Actions.GroupBy) {
         override fun isSelected(e: AnActionEvent) = CcSettings.get().groupByDay
         override fun setSelected(e: AnActionEvent, state: Boolean) {
             CcSettings.get().groupByDay = state
@@ -360,18 +407,24 @@ object SessionActions {
         }
     }
 
-    class InstallHooks : DumbAwareAction("Live-статус…", "Установить/удалить хук статуса сессий", AllIcons.Debugger.Db_set_breakpoint) {
+    class InstallHooks : DumbAwareAction(
+        message("action.CcSessions.InstallHooks.text"), message("action.CcSessions.InstallHooks.description"),
+        AllIcons.Debugger.Db_set_breakpoint,
+    ) {
         override fun getActionUpdateThread() = ActionUpdateThread.BGT
         override fun update(e: AnActionEvent) {
             val installed = HookInstaller.isInstalled()
-            e.presentation.text = if (installed) "Live-статус включён (нажмите, чтобы выключить)" else "Включить live-статус…"
+            e.presentation.setTexts(
+                if (installed) "cc.action.liveStatus.on" else "cc.action.liveStatus.enable",
+                "action.CcSessions.InstallHooks.description",
+            )
             e.presentation.icon = if (installed) AllIcons.Debugger.ThreadRunning else AllIcons.Debugger.ThreadSuspended
         }
 
         override fun actionPerformed(e: AnActionEvent) {
             val project = e.project
             if (HookInstaller.isInstalled()) {
-                val ok = Messages.showYesNoDialog(project, "Удалить хуки cc-sessions из settings.json?", "Live-статус", null)
+                val ok = Messages.showYesNoDialog(project, CcBundle.message("dialog.hooks.remove"), CcBundle.message("dialog.hooks.title"), null)
                 if (ok == Messages.YES) HookInstaller.uninstall(project)
             } else {
                 HookInstaller.install(project)
@@ -379,8 +432,10 @@ object SessionActions {
         }
     }
 
-    class OpenSettings : DumbAwareAction("Настройки", null, AllIcons.General.Settings) {
+    class OpenSettings : DumbAwareAction(message("cc.action.settings"), AllIcons.General.Settings) {
         override fun getActionUpdateThread() = ActionUpdateThread.BGT
+        override fun update(e: AnActionEvent) = e.presentation.setTexts("cc.action.settings")
+
         override fun actionPerformed(e: AnActionEvent) {
             ShowSettingsUtil.getInstance().showSettingsDialog(e.project, CcConfigurable::class.java)
         }

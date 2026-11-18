@@ -11,6 +11,7 @@ import com.intellij.util.ui.UIUtil
 import dev.xstreamka.ccsessions.core.DayGroup
 import dev.xstreamka.ccsessions.core.LiveState
 import dev.xstreamka.ccsessions.core.LiveStatus
+import dev.xstreamka.ccsessions.core.RelativeTime
 import dev.xstreamka.ccsessions.core.SessionMeta
 import dev.xstreamka.ccsessions.core.SessionSummary
 import dev.xstreamka.ccsessions.core.TranscriptHtml
@@ -23,11 +24,6 @@ import java.awt.Graphics2D
 import java.awt.Rectangle
 import java.awt.RenderingHints
 import java.time.Duration
-import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 import javax.swing.BoxLayout
 import javax.swing.JLabel
 import javax.swing.JList
@@ -177,13 +173,13 @@ class SessionCellRenderer(private val showProject: () -> Boolean) {
         info.clear()
         val gray = if (selected) SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, fg) else SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES
         val parts = buildList {
-            s.updatedAt?.let { add(relative(it)) }
+            s.updatedAt?.let { add(RelativeTime.relative(it)) }
             s.gitBranch?.let { add("⎇ $it") }
-            add("${s.prompts} пр.")
-            if (s.lastContext > 0) add("ктх ${TranscriptHtml.fmtTokens(s.lastContext)}")
+            add(CcBundle.message("row.prompts", s.prompts))
+            if (s.lastContext > 0) add(CcBundle.message("row.context", TranscriptHtml.fmtTokens(s.lastContext)))
             s.model?.let { add(shortModel(it)) }
             if (showProject()) s.cwd?.let { add(it.substringAfterLast('/')) }
-            if (value.contentMatch) add("найдено в тексте")
+            if (value.contentMatch) add(CcBundle.message("row.contentMatch"))
             if (s.isSdk) add("SDK")
         }
         info.append(parts.joinToString("  ·  "), gray)
@@ -194,10 +190,10 @@ class SessionCellRenderer(private val showProject: () -> Boolean) {
             val color = if (selected) fg else (CcIcons.colorFor(live) ?: fg)
             status.append(l.describe(), SimpleTextAttributes(SimpleTextAttributes.STYLE_SMALLER, color))
             val age = Duration.ofMillis(System.currentTimeMillis() - l.since)
-            if (live.active) status.append("  " + short(age), gray)
+            if (live.active) status.append("  " + RelativeTime.short(age), gray)
             status.isVisible = true
         } else if (value.ownTab) {
-            status.append("открыта во вкладке терминала", gray)
+            status.append(CcBundle.message("row.ownTab"), gray)
             status.isVisible = true
         } else {
             status.isVisible = false
@@ -208,6 +204,7 @@ class SessionCellRenderer(private val showProject: () -> Boolean) {
         // Пока видна кнопка, «раскрытие» длинной строки поверх списка выключено — иначе оно закрыло бы кнопку
         ClientProperty.put(root, ExpandableItemsHandler.RENDERER_DISABLED, if (showFinish) true else null)
         if (showFinish) {
+            finishLabel.text = CcBundle.message("row.finish")
             finishLabel.foreground = fg
             finishLabel.hot = buttonHovered
             // По вертикали — по центру строки заголовка
@@ -235,29 +232,7 @@ class SessionCellRenderer(private val showProject: () -> Boolean) {
     private fun visibleRight(list: JList<*>): Int = list.visibleRect.let { minOf(it.x + it.width, listRight(list)) }
 
     companion object {
-        const val FINISH_TEXT = "Завершить"
         private const val FINISH_GAP = 8
-        private val timeFmt = DateTimeFormatter.ofPattern("HH:mm")
-        private val dateFmt = DateTimeFormatter.ofPattern("d MMM", Locale.forLanguageTag("ru"))
-
-        fun relative(ts: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
-            val d = Duration.between(ts, now)
-            val day = ts.atZone(zone).toLocalDate()
-            val today = LocalDate.now(zone)
-            return when {
-                d.toMinutes() < 1 -> "только что"
-                d.toMinutes() < 60 -> "${d.toMinutes()} мин назад"
-                day == today -> "сегодня " + timeFmt.format(ts.atZone(zone))
-                day == today.minusDays(1) -> "вчера " + timeFmt.format(ts.atZone(zone))
-                else -> dateFmt.format(ts.atZone(zone))
-            }
-        }
-
-        fun short(d: Duration): String = when {
-            d.seconds < 60 -> "${d.seconds} с"
-            d.toMinutes() < 60 -> "${d.toMinutes()} мин"
-            else -> "${d.toHours()} ч"
-        }
 
         fun shortModel(m: String): String = m.removePrefix("claude-").replace(Regex("-\\d{8}$"), "")
     }
@@ -267,7 +242,7 @@ class SessionCellRenderer(private val showProject: () -> Boolean) {
  * Кнопка «Завершить» в строке сессии: «пилюля» с зелёной рамкой и заливкой, чтобы не сливалась с фоном.
  * [hot] — мышь над самой кнопкой: заливка ярче.
  */
-private class FinishButton : JLabel(SessionCellRenderer.FINISH_TEXT, AllIcons.Actions.Checked, LEFT) {
+private class FinishButton : JLabel(CcBundle.message("row.finish"), AllIcons.Actions.Checked, LEFT) {
     var hot = false
 
     init {

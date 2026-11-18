@@ -272,7 +272,7 @@ class TranscriptEditor(
             ApplicationManager.getApplication().invokeLater {
                 val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)
                 if (vf == null) {
-                    CcData.notify(project, "Файл не найден", StringUtil.escapeXmlEntities(path.toString()), NotificationType.WARNING)
+                    CcData.notify(project, CcBundle.message("notify.fileNotFound"), StringUtil.escapeXmlEntities(path.toString()), NotificationType.WARNING)
                     return@invokeLater
                 }
                 OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
@@ -284,7 +284,7 @@ class TranscriptEditor(
 
     override fun getComponent(): JComponent = root
     override fun getPreferredFocusedComponent(): JComponent? = browser?.component ?: fallback
-    override fun getName() = "Транскрипт"
+    override fun getName() = CcBundle.message("transcript.editor.name")
     override fun getFile(): VirtualFile = file
     override fun setState(state: FileEditorState) {}
     override fun isModified() = false

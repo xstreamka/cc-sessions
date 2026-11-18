@@ -57,9 +57,9 @@ object LiveNotifier {
         val alias = SessionsService.get(project).meta[t.after.sessionId]?.alias
         val name = alias ?: summary?.title ?: t.after.sessionId.take(8)
         val (title, type) = when (kind) {
-            "perm" -> "Claude ждёт разрешения" to NotificationType.WARNING
-            "error" -> "Claude: ошибка" to NotificationType.ERROR
-            else -> "Claude закончил" to NotificationType.INFORMATION
+            "perm" -> CcBundle.message("notify.live.permission") to NotificationType.WARNING
+            "error" -> CcBundle.message("notify.live.error") to NotificationType.ERROR
+            else -> CcBundle.message("notify.live.idle") to NotificationType.INFORMATION
         }
         val details = when (kind) {
             "perm" -> t.after.describe()
@@ -71,12 +71,12 @@ object LiveNotifier {
         val sid = t.after.sessionId
         NotificationGroupManager.getInstance().getNotificationGroup(CcData.NOTIFICATION_GROUP)
             .createNotification(title, content, type)
-            .addAction(NotificationAction.createSimpleExpiring("Показать") {
+            .addAction(NotificationAction.createSimpleExpiring(CcBundle.message("notify.action.show")) {
                 if (!TerminalLauncher.get(project).focus(sid)) {
                     ToolWindowManager.getInstance(project).getToolWindow(SessionsToolWindowFactory.ID)?.activate(null)
                 }
             })
-            .addAction(NotificationAction.createSimple("Транскрипт") { TranscriptEditorProvider.open(project, sid) })
+            .addAction(NotificationAction.createSimple(CcBundle.message("notify.action.transcript")) { TranscriptEditorProvider.open(project, sid) })
             .notify(project)
     }
 

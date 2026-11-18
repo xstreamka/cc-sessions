@@ -73,12 +73,12 @@ class SessionsPanel(
     init {
         list.cellRenderer = renderer
         list.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        list.emptyText.text = "Сессий Claude Code для этого проекта пока нет"
-        list.emptyText.appendSecondaryText("Начать новую сессию", SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) {
+        list.emptyText.text = CcBundle.message("panel.empty")
+        list.emptyText.appendSecondaryText(CcBundle.message("panel.empty.newSession"), SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) {
             SessionActions.startNew(project)
         }
 
-        search.textEditor.emptyText.text = "Поиск: название, промпт, ветка, #тег; от 3 символов — и по тексту"
+        search.textEditor.emptyText.text = CcBundle.message("panel.search.placeholder")
         search.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(e: DocumentEvent) {
                 alarm.cancelAllRequests()
@@ -98,7 +98,7 @@ class SessionsPanel(
 
         val am = ActionManager.getInstance()
         val toolbarGroup = DefaultActionGroup(
-            SessionActions.NewSession(),
+            SessionActions.NewSession("cc.action.newSession"),
             SessionActions.Refresh(),
             Separator.getInstance(),
             SessionActions.ToggleAllProjects(),
@@ -312,7 +312,7 @@ class SessionsPanel(
         }
 
         override fun getToolTipText(event: MouseEvent?): String? {
-            if (event != null && finishButtonAt(event.point) != null) return FINISH_TOOLTIP
+            if (event != null && finishButtonAt(event.point) != null) return CcBundle.message("panel.finish.tooltip")
             return super.getToolTipText(event)
         }
 
@@ -416,8 +416,4 @@ class SessionsPanel(
     }
 
     override fun dispose() {}
-
-    companion object {
-        private const val FINISH_TOOLTIP = "Завершить: в архив и закрыть вкладку терминала"
-    }
 }

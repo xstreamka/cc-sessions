@@ -174,6 +174,12 @@ class SessionIndex {
 
     private val cache = ConcurrentHashMap<Path, Entry>()
 
+    /**
+     * Забыть все сводки: следующий [scan] перечитает транскрипты целиком. Нужно при смене языка плагина —
+     * в сводках лежат тексты, подставленные при разборе (например «[изображение]» вместо пустого промпта).
+     */
+    fun clear() = cache.clear()
+
     /** Список сессий в каталогах проектов (без субагентов), отсортированный по последней активности. */
     fun scan(projectDirs: Collection<Path>): List<SessionSummary> {
         val alive = HashSet<Path>()

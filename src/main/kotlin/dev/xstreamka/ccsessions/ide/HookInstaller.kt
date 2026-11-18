@@ -79,18 +79,17 @@ object HookInstaller {
         val settingsFile = CcData.paths.settingsFile
         val ok = Messages.showOkCancelDialog(
             project,
-            "Плагин добавит в $settingsFile асинхронный хук cc-sessions-hook на события:\n" +
-                HooksConfig.EVENTS.joinToString(", ") + "\n\n" +
-                "Хук не блокирует Claude Code и не меняет его поведение — он только пишет короткие события в\n" +
-                "${CcData.paths.eventsDir}.\n\n" +
-                "Ваши хуки (GSD, rm-guard и др.) не затрагиваются. Перед записью будет сделана резервная копия settings.json.",
-            "Включить live-статус сессий",
-            "Установить", "Отмена", Messages.getQuestionIcon(),
+            CcBundle.message(
+                "hooks.install.message",
+                settingsFile.toString(), HooksConfig.EVENTS.joinToString(", "), CcData.paths.eventsDir.toString(),
+            ),
+            CcBundle.message("hooks.install.title"),
+            CcBundle.message("button.install"), CcBundle.message("button.cancel"), Messages.getQuestionIcon(),
         )
         if (ok != Messages.OK) return
         try {
             if (!syncBinary()) {
-                Messages.showErrorDialog(project, "Для этой ОС/архитектуры нет собранного хука.", "CC Sessions")
+                Messages.showErrorDialog(project, CcBundle.message("hooks.noBinary"), "CC Sessions")
                 return
             }
             val settings = HooksConfig.readSettings(settingsFile)
@@ -98,14 +97,14 @@ object HookInstaller {
             val backup = if (changed) HooksConfig.writeSettings(settingsFile, settings, CcSettings.backupDir()) else null
             cache = null
             CcData.notify(
-                project, "Live-статус включён",
-                "Хуки добавлены в settings.json" + (backup?.let { " (бэкап: $it)" } ?: "") +
-                    ". Статус появится у новых и перезапущенных сессий Claude Code.",
+                project, CcBundle.message("hooks.enabled.title"),
+                if (backup != null) CcBundle.message("hooks.enabled.contentWithBackup", backup.toString())
+                else CcBundle.message("hooks.enabled.content"),
             )
             LiveStatusService.get().ensureStarted()
         } catch (e: Exception) {
             thisLogger().warn(e)
-            Messages.showErrorDialog(project, "Не удалось изменить settings.json: ${e.message}", "CC Sessions")
+            Messages.showErrorDialog(project, CcBundle.message("hooks.error", e.message.toString()), "CC Sessions")
         }
     }
 
@@ -116,12 +115,12 @@ object HookInstaller {
             if (HooksConfig.uninstall(settings)) {
                 val backup = HooksConfig.writeSettings(settingsFile, settings, CcSettings.backupDir())
                 cache = null
-                CcData.notify(project, "Live-статус выключен", "Хуки cc-sessions удалены из settings.json (бэкап: $backup).")
+                CcData.notify(project, CcBundle.message("hooks.disabled.title"), CcBundle.message("hooks.disabled.content", backup.toString()))
             } else {
-                CcData.notify(project, "Live-статус", "Хуков cc-sessions в settings.json нет.")
+                CcData.notify(project, CcBundle.message("hooks.title"), CcBundle.message("hooks.notInstalled"))
             }
         } catch (e: Exception) {
-            Messages.showErrorDialog(project, "Не удалось изменить settings.json: ${e.message}", "CC Sessions")
+            Messages.showErrorDialog(project, CcBundle.message("hooks.error", e.message.toString()), "CC Sessions")
         }
     }
 
@@ -132,11 +131,11 @@ object HookInstaller {
         st.hooksPromptShown = true
         NotificationGroupManager.getInstance().getNotificationGroup(CcData.NOTIFICATION_GROUP)
             .createNotification(
-                "CC Sessions: live-статус",
-                "Чтобы видеть, что делает каждая сессия Claude Code (думает, ждёт разрешения, закончила), нужен лёгкий асинхронный хук.",
+                CcBundle.message("hooks.suggest.title"),
+                CcBundle.message("hooks.suggest.content"),
                 NotificationType.INFORMATION,
             )
-            .addAction(NotificationAction.createSimpleExpiring("Включить") { install(project) })
+            .addAction(NotificationAction.createSimpleExpiring(CcBundle.message("hooks.suggest.enable")) { install(project) })
             .notify(project)
     }
 }

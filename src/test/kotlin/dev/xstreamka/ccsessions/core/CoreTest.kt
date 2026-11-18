@@ -678,4 +678,83 @@ class CoreTest {
             }
         }
     }
+
+    @Test
+    fun relativeTimeRussianAsBefore() {
+        val zone = java.time.ZoneOffset.UTC
+        val now = Instant.parse("2026-11-18T12:00:00Z")
+        fun rel(iso: String) = RelativeTime.relative(Instant.parse(iso), now, zone)
+        withLocale(java.util.Locale.of("ru")) {
+            assertEquals("только что", rel("2026-11-18T11:59:30Z"))
+            assertEquals("5 мин назад", rel("2026-11-18T11:55:00Z"))
+            assertEquals("сегодня 10:05", rel("2026-11-18T10:05:00Z"))
+            assertEquals("вчера 23:10", rel("2026-11-17T23:10:00Z"))
+            assertEquals(
+                java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.forLanguageTag("ru"))
+                    .format(Instant.parse("2026-11-03T09:00:00Z").atZone(zone)),
+                rel("2026-11-03T09:00:00Z"),
+            )
+            assertEquals("45 с", RelativeTime.short(java.time.Duration.ofSeconds(45)))
+            assertEquals("3 мин", RelativeTime.short(java.time.Duration.ofMinutes(3)))
+            assertEquals("1500 ч", RelativeTime.short(java.time.Duration.ofHours(1500)))
+            assertEquals("1500 пр.", I18n.msg("row.prompts", 1500))
+        }
+    }
+
+    @Test
+    fun relativeTimeEnglish() {
+        val zone = java.time.ZoneOffset.UTC
+        val now = Instant.parse("2026-11-18T12:00:00Z")
+        fun rel(iso: String) = RelativeTime.relative(Instant.parse(iso), now, zone)
+        withLocale(java.util.Locale.ROOT) {
+            assertEquals("just now", rel("2026-11-18T11:59:30Z"))
+            assertEquals("5 min ago", rel("2026-11-18T11:55:00Z"))
+            assertEquals("today 10:05", rel("2026-11-18T10:05:00Z"))
+            assertEquals("yesterday 23:10", rel("2026-11-17T23:10:00Z"))
+            assertEquals("Nov 3", rel("2026-11-03T09:00:00Z"))
+            assertEquals("45s", RelativeTime.short(java.time.Duration.ofSeconds(45)))
+            assertEquals("3m", RelativeTime.short(java.time.Duration.ofMinutes(3)))
+            assertEquals("2h", RelativeTime.short(java.time.Duration.ofHours(2)))
+            assertEquals("1 prompt", I18n.msg("row.prompts", 1))
+            assertEquals("2 prompts", I18n.msg("row.prompts", 2L))
+            assertEquals("0 prompts", I18n.msg("row.prompts", 0))
+        }
+    }
+
+    @Test
+    fun ideTextsWithApostrophesAndArgs() {
+        withLocale(java.util.Locale.ROOT) {
+            assertEquals("Couldn't modify settings.json: boom", I18n.msg("hooks.error", "boom"))
+            assertEquals("Couldn't delete the session", I18n.msg("notify.deleteFailed"))
+            assertTrue(I18n.msg("settings.live.comment", "/x").contains("It doesn't block"))
+        }
+        withLocale(java.util.Locale.of("ru")) {
+            assertEquals("Не удалось изменить settings.json: boom", I18n.msg("hooks.error", "boom"))
+            assertEquals(
+                "Удалить сессию «a» навсегда?\n\nБудут удалены (1 KB):\n  x\n\nОтменить удаление нельзя.",
+                I18n.msg("dialog.delete.message", "a", "1 KB", "  x"),
+            )
+        }
+    }
+
+    @Test
+    fun indexClearReparsesInNewLanguage() {
+        val dir = Files.createTempDirectory("idx")
+        val file = dir.resolve("$sid.jsonl")
+        Files.writeString(
+            file,
+            """{"sessionId": "$sid", "type": "user", "uuid": "u1", "timestamp": "2026-11-18T09:00:00.000Z", """ +
+                """"message": {"role": "user", "content": [{"type": "image", "source": {}}]}}""" + "\n",
+        )
+        val index = SessionIndex()
+        withLocale(java.util.Locale.of("ru")) {
+            assertEquals("[изображение]", index.scan(listOf(dir)).single().firstPrompt)
+        }
+        withLocale(java.util.Locale.ROOT) {
+            // файл не менялся — сводка из кеша, на старом языке
+            assertEquals("[изображение]", index.scan(listOf(dir)).single().firstPrompt)
+            index.clear()
+            assertEquals("[image]", index.scan(listOf(dir)).single().firstPrompt)
+        }
+    }
 }

@@ -26,7 +26,7 @@ class SessionsToolWindowFactory : ToolWindowFactory, DumbAware {
     private fun addPanel(project: Project, toolWindow: ToolWindow) {
         val panel = SessionsPanel(project, toolWindow)
         // Имя вкладки выводится в заголовке рядом с названием окна: «CC Sessions · сессии Claude Code»
-        val content = ContentFactory.getInstance().createContent(panel, "сессии Claude Code", false)
+        val content = ContentFactory.getInstance().createContent(panel, CcBundle.message("toolwindow.tab"), false)
         Disposer.register(content, panel)
         toolWindow.contentManager.addContent(content)
     }
