@@ -1,18 +1,24 @@
 package dev.xstreamka.ccsessions.ide
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.wm.ToolWindowId
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import com.intellij.util.concurrency.AppExecutorUtil
 import dev.xstreamka.ccsessions.core.SessionIndex
 import dev.xstreamka.ccsessions.core.SessionMeta
 import dev.xstreamka.ccsessions.core.SessionSummary
 import dev.xstreamka.ccsessions.core.TabsRestore
 import java.nio.file.Files
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Восстановление после перезапуска IDE того, что плагин открывал в проекте (см. [CcOpenTabs]): панель
@@ -88,11 +94,42 @@ object CcRestore {
         )
     }
 
-    /** Показать панель без кражи фокуса у редактора (show, а не activate). */
+    /** Сколько после показа панели ждать, не вытеснит ли её окно Project, которое платформа открывает при старте. */
+    private const val PROJECT_VIEW_WATCH_MS = 15_000L
+
+    /**
+     * Показать панель без кражи фокуса у редактора (show, а не activate).
+     *
+     * При открытии проекта платформа сама показывает окно Project (`openProjectViewIfNeeded`, 2026.3) — иногда уже
+     * после нас; на той же стороне оно вытесняет панель. Поэтому первые [PROJECT_VIEW_WATCH_MS] следим: если панель
+     * скрылась и на её стороне показано окно Project — один раз показываем панель снова.
+     */
     private fun showPanel(project: Project) {
         if (project.isDisposed) return
-        val tw = ToolWindowManager.getInstance(project).getToolWindow(SessionsToolWindowFactory.ID) ?: return
+        val manager = ToolWindowManager.getInstance(project)
+        val tw = manager.getToolWindow(SessionsToolWindowFactory.ID) ?: return
         if (!tw.isVisible) tw.show()
+
+        val watch = Disposer.newDisposable("cc-sessions panel restore")
+        Disposer.register(SessionsService.get(project), watch)
+        // Слежение закончено (панель уже вернули один раз или вышло время) — дальше ничего не делаем
+        val done = AtomicBoolean(false)
+        fun stopWatching() {
+            if (done.compareAndSet(false, true)) Disposer.dispose(watch)
+        }
+        project.messageBus.connect(watch).subscribe(ToolWindowManagerListener.TOPIC, object : ToolWindowManagerListener {
+            override fun stateChanged(toolWindowManager: ToolWindowManager) {
+                if (done.get()) return
+                val pv = toolWindowManager.getToolWindow(ToolWindowId.PROJECT_VIEW) ?: return
+                if (tw.isVisible || !pv.isVisible || pv.anchor != tw.anchor || pv.isSplitMode != tw.isSplitMode) return
+                stopWatching()
+                toolWindowManager.invokeLater { safely("panel") { if (!project.isDisposed && !tw.isVisible) tw.show() } }
+            }
+        })
+        AppExecutorUtil.getAppScheduledExecutorService().schedule(
+            { ApplicationManager.getApplication().invokeLater(::stopWatching) },
+            PROJECT_VIEW_WATCH_MS, TimeUnit.MILLISECONDS,
+        )
     }
 
     /** Фон: сводки, проверки и план; затем открытие вкладок на EDT. */
