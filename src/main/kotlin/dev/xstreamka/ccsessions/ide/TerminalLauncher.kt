@@ -44,12 +44,16 @@ class TerminalLauncher(private val project: Project) {
 
     fun hasOpenTab(sessionId: String): Boolean = tabs[sessionId]?.let(::isAlive) == true
 
-    /** Продолжить сессию. Если вкладка уже открыта нами — просто показать её. */
-    fun resume(s: SessionSummary, alias: String?) {
+    /**
+     * Продолжить сессию. Если вкладка уже открыта нами — просто показать её.
+     * [skip] (восстановление, см. [CcRestore]) проверяется на EDT непосредственно перед созданием вкладки:
+     * true — вкладку не создаём.
+     */
+    fun resume(s: SessionSummary, alias: String?, skip: (() -> Boolean)? = null) {
         if (focus(s.id)) return
         val st = CcSettings.get()
         val cmd = Shell.claude(st.claudeCommand.orEmpty(), st.resumeArgs.orEmpty(), listOf("--resume", s.id))
-        launch(s.id, workDirFor(s), tabTitle(alias ?: s.title), cmd)
+        launch(s.id, workDirFor(s), tabTitle(alias ?: s.title), cmd, skip)
     }
 
     /** Ответвить сессию: новая копия с новым ID, оригинал не меняется. */
@@ -138,8 +142,10 @@ class TerminalLauncher(private val project: Project) {
         }, project.disposed)
     }
 
-    private fun launch(sessionId: String?, workDir: String?, title: String, command: String) {
+    private fun launch(sessionId: String?, workDir: String?, title: String, command: String, skip: (() -> Boolean)? = null) {
         ApplicationManager.getApplication().invokeLater {
+            if (skip?.invoke() == true) return@invokeLater
+            var registered = false
             try {
                 val dir = workDir?.takeIf { Files.isDirectory(Paths.get(it)) } ?: project.basePath
                 val inEditor = CcSettings.get().openInEditor
@@ -154,8 +160,6 @@ class TerminalLauncher(private val project: Project) {
                 if (sessionId != null) {
                     tabs[sessionId] = tab
                     if (file != null) editorFiles[sessionId] = file
-                    // Запоминаем для восстановления после перезапуска IDE
-                    CcOpenTabs.getIfAlive(project)?.sessionOpened(sessionId)
                     tab.view.coroutineScope.coroutineContext.job.invokeOnCompletion {
                         tabs.remove(sessionId, tab)
                         if (file != null) editorFiles.remove(sessionId, file)
@@ -165,6 +169,7 @@ class TerminalLauncher(private val project: Project) {
                             CcOpenTabs.ifCreated(project)?.sessionClosed(sessionId) { hasOpenTab(sessionId) }
                         }
                     }
+                    registered = true
                 }
                 if (file == null) ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID)?.activate(null)
             } catch (e: Throwable) {
@@ -175,6 +180,16 @@ class TerminalLauncher(private val project: Project) {
                     project, CcBundle.message("notify.terminalFailed.title"),
                     CcBundle.message("notify.terminalFailed.content", StringUtil.escapeXmlEntities(command)), NotificationType.WARNING,
                 )
+            }
+            // Запоминаем для восстановления после перезапуска IDE — вне try выше: сбой учёта не означает, что вкладка
+            // не открылась, и не должен выдавать ошибку терминала (вкладка открыта, команда отправлена)
+            if (registered && sessionId != null) {
+                try {
+                    CcOpenTabs.getIfAlive(project)?.sessionOpened(sessionId)
+                } catch (e: Throwable) {
+                    if (e is ControlFlowException || e is ProcessCanceledException) throw e
+                    thisLogger().warn("cannot remember open terminal tab", e)
+                }
             }
         }
     }

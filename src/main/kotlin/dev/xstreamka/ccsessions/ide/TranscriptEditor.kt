@@ -91,6 +91,21 @@ class TranscriptEditorProvider : FileEditorProvider, DumbAware {
             OpenFileDescriptor(project, file).navigate(true)
         }
 
+        /**
+         * Файл транскрипта сессии [sessionId]: из индекса проекта, по live-статусу или в каталогах всех проектов
+         * (сессия из другого проекта). Общий для вкладки транскрипта и восстановления ([CcRestore]); id может прийти
+         * из workspace проекта — разделители путей и ведущую точку в нём не допускаем.
+         */
+        fun transcriptFile(project: Project, sessionId: String): Path? {
+            if (sessionId.isBlank() || sessionId.any { it == '/' || it == '\\' } || sessionId.startsWith(".")) return null
+            SessionsService.get(project).find(sessionId)?.file?.takeIf(Files::isRegularFile)?.let { return it }
+            LiveStatusService.get().state(sessionId)?.transcriptPath
+                ?.let { p -> runCatching { Paths.get(p) }.getOrNull() }
+                ?.takeIf { it.fileName?.toString() == "$sessionId.jsonl" && Files.isRegularFile(it) }
+                ?.let { return it }
+            return CcData.paths.allProjectDirs().asSequence().map { it.resolve("$sessionId.jsonl") }.firstOrNull(Files::isRegularFile)
+        }
+
         /** Закрыть вкладку транскрипта сессии, если она открыта (вызывать на EDT). */
         fun close(project: Project, sessionId: String) {
             val file = files[sessionId] ?: return
@@ -178,13 +193,6 @@ class TranscriptEditor(
         reload(full = true)
     }
 
-    private fun transcriptPath(): Path? {
-        SessionsService.get(project).find(sessionId)?.file?.let { return it }
-        LiveStatusService.get().state(sessionId)?.transcriptPath?.let { p -> Paths.get(p).takeIf { Files.isRegularFile(it) }?.let { return it } }
-        // сессия из другого проекта — ищем по всем каталогам
-        return CcData.paths.allProjectDirs().asSequence().map { it.resolve("$sessionId.jsonl") }.firstOrNull { Files.isRegularFile(it) }
-    }
-
     private fun reload(full: Boolean) {
         if (!loading.compareAndSet(false, true)) {
             if (full) pendingFull.set(true)
@@ -193,7 +201,7 @@ class TranscriptEditor(
         }
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                val path = transcriptPath() ?: return@executeOnPooledThread
+                val path = TranscriptEditorProvider.transcriptFile(project, sessionId) ?: return@executeOnPooledThread
                 val size = Files.size(path)
                 if (!full && size == lastSize) return@executeOnPooledThread
                 lastSize = size

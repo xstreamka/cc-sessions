@@ -1,9 +1,11 @@
 package dev.xstreamka.ccsessions.ide
 
+import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.util.concurrency.AppExecutorUtil
 import dev.xstreamka.ccsessions.core.SessionIndex
@@ -11,8 +13,6 @@ import dev.xstreamka.ccsessions.core.SessionMeta
 import dev.xstreamka.ccsessions.core.SessionSummary
 import dev.xstreamka.ccsessions.core.TabsRestore
 import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 
 /**
  * Восстановление после перезапуска IDE того, что плагин открывал в проекте (см. [CcOpenTabs]): панель
@@ -21,7 +21,8 @@ import java.nio.file.Paths
  * Открытие проекта не блокируется: сводки и проверки — в фоне (ждём первый скан индекса), вкладки открываются на
  * EDT, когда окна инструментов проекта уже зарегистрированы ([ToolWindowManager.invokeLater]). Уведомлений нет;
  * ошибки — только в лог. Открытые заново вкладки записываются в [CcOpenTabs] обычным путём — без дублей, в том же
- * порядке; пропущенные id из сохранённых списков убираются.
+ * порядке; пропущенные id из сохранённых списков убираются — кроме сессий, которые сейчас ведёт другой claude
+ * (в том числе в другом открытом проекте): их не открываем, но оставляем в списке до следующего открытия.
  *
  * Восстановление идёт один раз на открытие проекта: отметка в системных свойствах JVM переживает перезагрузку
  * плагина (динамическое обновление) — иначе во вкладки, пережившие перезагрузку, запустился бы второй
@@ -39,8 +40,10 @@ object CcRestore {
 
     /** Вызывать из [CcStartup] после запуска индекса и live-статусов. */
     fun start(project: Project) {
+        // Проект уже закрыт — отметку не ставим: projectClosing её уже снимал, и иначе она осталась бы навсегда
+        if (project.isDisposed) return
         if (!markRestored(project)) return
-        val tabs = CcOpenTabs.getIfAlive(project) ?: return
+        val tabs = CcOpenTabs.getIfAlive(project) ?: return clearRestoredMarker(project)
         // Снимок до того, как восстановленные вкладки начнут записываться снова
         val sessionIds = tabs.sessions()
         val transcriptIds = tabs.transcripts()
@@ -109,13 +112,14 @@ object CcRestore {
             emptyMap()
         }
         val live = LiveStatusService.get()
+        val now = System.currentTimeMillis()
 
         // Сводка сессии: из индекса проекта, иначе (сессия из другого проекта) — прямо из её файла
         val index = SessionIndex()
         val summaries = HashMap<String, SessionSummary?>()
         fun summary(id: String): SessionSummary? = summaries.getOrPut(id) {
             svc.find(id)?.takeIf { s -> s.file?.let(Files::isRegularFile) == true }
-                ?: transcriptFile(svc, id)?.let(index::summarize)
+                ?: TranscriptEditorProvider.transcriptFile(project, id)?.let(index::summarize)
         }
 
         val sessionPlan = TabsRestore.sessions(
@@ -123,41 +127,66 @@ object CcRestore {
             // Пустую сессию (ни одного сообщения) claude не продолжит — считаем, что её нет
             exists = { id -> summary(id)?.isEmpty == false },
             archived = { id -> meta[id]?.archived == true || summary(id)?.archivedInAir == true },
-            // Активна по live-статусу только с событиями после закрытия проекта — иначе это наш claude, убитый с IDE
-            active = { id -> live.state(id)?.let { TabsRestore.runningElsewhere(it.status.active, it.updatedAt, closedAt) } == true },
+            // Активна по live-статусу (без «зависших») только с событиями после закрытия проекта — иначе это наш
+            // claude, убитый с IDE; работающие не открываем, но оставляем в списке
+            active = { id -> live.state(id)?.let { TabsRestore.runningElsewhere(it, closedAt, now) } == true },
         )
-        val transcriptPlan = TabsRestore.transcripts(transcriptIds, exists = { id -> transcriptFile(svc, id) != null })
+        val transcriptPlan = TabsRestore.transcripts(
+            transcriptIds, exists = { id -> TranscriptEditorProvider.transcriptFile(project, id) != null },
+        )
         val toResume = sessionPlan.restore.mapNotNull { id -> summary(id) }
         if (sessionPlan.drop.isNotEmpty() || transcriptPlan.drop.isNotEmpty()) {
             LOG.info("not restoring sessions ${sessionPlan.drop}, transcripts ${transcriptPlan.drop}")
         }
+        if (sessionPlan.keep.isNotEmpty()) LOG.info("sessions are running elsewhere, kept for later: ${sessionPlan.keep}")
 
         ToolWindowManager.getInstance(project).invokeLater {
-            if (project.isDisposed) return@invokeLater
+            if (stopped(project, tabs)) return@invokeLater
             val launcher = TerminalLauncher.get(project)
             forget(project, tabs, sessionPlan.drop, transcriptPlan.drop)
             for (id in transcriptPlan.restore) {
+                if (stopped(project, tabs)) return@invokeLater
                 safely("transcript $id") { TranscriptEditorProvider.open(project, id) }
             }
             for (s in toResume) {
-                safely("session ${s.id}") { launcher.resume(s, meta[s.id]?.alias) }
+                if (stopped(project, tabs)) return@invokeLater
+                // Проверка ещё раз — в момент запуска вкладки (на EDT): проект могли начать закрывать, а сессию —
+                // открыть в другом проекте, восстановление которого запустило вкладку раньше
+                safely("session ${s.id}") { launcher.resume(s, meta[s.id]?.alias, skip = { skipLaunch(project, tabs, s.id) }) }
             }
         }
     }
 
+    /** Проект закрыт или закрывается — восстановление прекращаем. */
+    private fun stopped(project: Project, tabs: CcOpenTabs): Boolean = project.isDisposed || tabs.isClosing()
+
     /**
-     * Файл транскрипта сессии [id]: из индекса, по live-статусу или в каталогах всех проектов (как в транскрипте).
-     * id берётся из workspace проекта — разделители путей в нём не допускаем.
+     * Не запускать `claude --resume` во время восстановления (вызывается на EDT перед созданием вкладки): проект
+     * закрывается или вкладка этой сессии уже открыта плагином в другом открытом проекте. id остаётся в списке.
      */
-    private fun transcriptFile(svc: SessionsService, id: String): Path? {
-        if (id.isBlank() || id.any { it == '/' || it == '\\' } || id.startsWith(".")) return null
-        svc.find(id)?.file?.takeIf(Files::isRegularFile)?.let { return it }
-        LiveStatusService.get().state(id)?.transcriptPath
-            ?.let { p -> runCatching { Paths.get(p) }.getOrNull() }
-            ?.takeIf { it.fileName?.toString() == "$id.jsonl" && Files.isRegularFile(it) }
-            ?.let { return it }
-        return CcData.paths.allProjectDirs().asSequence().map { it.resolve("$id.jsonl") }.firstOrNull(Files::isRegularFile)
+    private fun skipLaunch(project: Project, tabs: CcOpenTabs, sessionId: String): Boolean = try {
+        when {
+            stopped(project, tabs) -> true
+            openInOtherProject(project, sessionId) -> {
+                LOG.info("session $sessionId is open in another project, kept for later")
+                true
+            }
+            else -> false
+        }
+    } catch (e: Throwable) {
+        // Проект закрывают прямо сейчас — не запускаем; иная ошибка проверки не мешает восстановлению
+        if (e is ControlFlowException) true
+        else {
+            LOG.warn("cannot check session $sessionId in other projects", e)
+            false
+        }
     }
+
+    /** Вкладка сессии [sessionId] открыта плагином в другом проекте; лаунчер чужого проекта не создаём. */
+    private fun openInOtherProject(project: Project, sessionId: String): Boolean =
+        ProjectManager.getInstance().openProjects.any { other ->
+            other !== project && !other.isDisposed && other.serviceIfCreated<TerminalLauncher>()?.hasOpenTab(sessionId) == true
+        }
 
     /** Ошибка одной вкладки не мешает остальным и не роняет открытие проекта — только в лог. */
     private inline fun safely(what: String, block: () -> Unit) {

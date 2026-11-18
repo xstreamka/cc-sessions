@@ -809,7 +809,9 @@ class CoreTest {
         )
         // порядок открытия сохраняется — вкладки вернутся в том же порядке
         assertEquals(listOf("ok1", "ok2"), plan.restore)
-        assertEquals(listOf("gone", "arch", "busy"), plan.drop)
+        assertEquals(listOf("gone", "arch"), plan.drop)
+        // работающую в другом месте не открываем, но и не забываем — проверим при следующем открытии
+        assertEquals(listOf("busy"), plan.keep)
     }
 
     @Test
@@ -850,19 +852,63 @@ class CoreTest {
         assertSame(list, OpenTabsList.removedAll(list, emptyList()))
     }
 
+    private fun live(status: LiveStatus, updatedAt: Long) = LiveState("s", status, since = updatedAt, updatedAt = updatedAt)
+
     @Test
     fun runningElsewhereOnlyWithEventsAfterClose() {
         val closedAt = 1_000_000L
         val grace = TabsRestore.CLOSE_GRACE_MS
+        val now = closedAt + grace + 60_000
         // наш claude, убитый вместе с IDE: последнее событие «работает», но до закрытия — восстанавливаем
-        assertFalse(TabsRestore.runningElsewhere(true, closedAt - 5_000, closedAt))
+        assertFalse(TabsRestore.runningElsewhere(live(LiveStatus.WORKING, closedAt - 5_000), closedAt, now))
         // события в первые секунды после закрытия — ещё наш claude, пока IDE выходит
-        assertFalse(TabsRestore.runningElsewhere(true, closedAt + grace, closedAt))
+        assertFalse(TabsRestore.runningElsewhere(live(LiveStatus.WORKING, closedAt + grace), closedAt, now))
         // активна и пишет события позже — её ведёт другой claude
-        assertTrue(TabsRestore.runningElsewhere(true, closedAt + grace + 1, closedAt))
+        assertTrue(TabsRestore.runningElsewhere(live(LiveStatus.WORKING, closedAt + grace + 1), closedAt, now))
         // не активна (idle/ended) — не мешает, даже если события свежие
-        assertFalse(TabsRestore.runningElsewhere(false, closedAt + grace + 60_000, closedAt))
+        assertFalse(TabsRestore.runningElsewhere(live(LiveStatus.IDLE, now), closedAt, now))
+        assertFalse(TabsRestore.runningElsewhere(live(LiveStatus.ENDED, now), closedAt, now))
         // время закрытия неизвестно — по live-статусу не пропускаем
-        assertFalse(TabsRestore.runningElsewhere(true, Long.MAX_VALUE, 0L))
+        assertFalse(TabsRestore.runningElsewhere(live(LiveStatus.WORKING, now), 0L, now))
+    }
+
+    @Test
+    fun runningElsewhereIgnoresStaleActiveAfterCrash() {
+        // IDE упала: closedAt — время давнего чистого закрытия, claude убит посреди работы без SessionEnd
+        val closedAt = 1_000_000L
+        val updatedAt = closedAt + 3_600_000
+        val staleNow = updatedAt + 20 * 60_000 + 1
+        val state = live(LiveStatus.WORKING, updatedAt)
+        // «работает», но молчит дольше порога «зависших» (как effectiveStatus) — процесса нет, восстанавливаем
+        assertEquals(LiveStatus.STALE, state.effectiveStatus(staleNow))
+        assertFalse(TabsRestore.runningElsewhere(state, closedAt, staleNow))
+        assertFalse(TabsRestore.runningElsewhere(live(LiveStatus.TOOL, updatedAt), closedAt, staleNow))
+        // свежие события после закрытия — её ведёт другой claude: не открываем, но оставляем в списке
+        val freshNow = updatedAt + 60_000
+        assertTrue(TabsRestore.runningElsewhere(state, closedAt, freshNow))
+        val plan = TabsRestore.sessions(
+            listOf("s"), exists = { true }, archived = { false },
+            active = { TabsRestore.runningElsewhere(state, closedAt, freshNow) },
+        )
+        assertEquals(emptyList<String>(), plan.restore)
+        assertEquals(emptyList<String>(), plan.drop)
+        assertEquals(listOf("s"), plan.keep)
+        val stalePlan = TabsRestore.sessions(
+            listOf("s"), exists = { true }, archived = { false },
+            active = { TabsRestore.runningElsewhere(state, closedAt, staleNow) },
+        )
+        assertEquals(listOf("s"), stalePlan.restore)
+        assertEquals(emptyList<String>(), stalePlan.keep)
+    }
+
+    @Test
+    fun runningElsewhereWaitingPermissionNeverStale() {
+        // ожидание разрешения может длиться сколько угодно — как и в effectiveStatus, не «протухает»
+        val closedAt = 1_000_000L
+        val updatedAt = closedAt + 3_600_000
+        val now = updatedAt + 24 * 3_600_000L
+        val state = live(LiveStatus.WAITING_PERMISSION, updatedAt)
+        assertEquals(LiveStatus.WAITING_PERMISSION, state.effectiveStatus(now))
+        assertTrue(TabsRestore.runningElsewhere(state, closedAt, now))
     }
 }
