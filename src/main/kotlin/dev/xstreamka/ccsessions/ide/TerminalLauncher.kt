@@ -16,6 +16,7 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTab
+import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabBuilder
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
 import com.intellij.util.concurrency.AppExecutorUtil
 import dev.xstreamka.ccsessions.core.Shell
@@ -143,11 +144,11 @@ class TerminalLauncher(private val project: Project) {
                 val dir = workDir?.takeIf { Files.isDirectory(Paths.get(it)) } ?: project.basePath
                 val inEditor = CcSettings.get().openInEditor
                 val manager = TerminalToolWindowTabsManager.getInstance(project)
-                val tab = manager.createTabBuilder()
+                val builder = manager.createTabBuilder()
                     .workingDirectory(dir)
                     .tabName(title)
                     .requestFocus(!inEditor)
-                    .createTab()
+                val tab = withoutPlatformRestore(builder).createTab()
                 tab.view.createSendTextBuilder().shouldExecute().send(command)
                 val file = if (inEditor) moveToEditor(manager, tab) else null
                 if (sessionId != null) {
@@ -207,6 +208,20 @@ class TerminalLauncher(private val project: Project) {
             manager.attachTab(tab)
             null
         }
+    }
+
+    /**
+     * Вкладки сессий после перезапуска возвращает сам плагин (claude --resume, см. [CcRestore]), поэтому платформа
+     * не должна восстанавливать их ещё раз — пустым shell с тем же именем. `restoreOnProjectReopen` есть с 2026.3 (263);
+     * вызываем через рефлексию, на 262 метода нет — вкладка создаётся как раньше.
+     */
+    private fun withoutPlatformRestore(builder: TerminalToolWindowTabBuilder): TerminalToolWindowTabBuilder = try {
+        TerminalToolWindowTabBuilder::class.java
+            .getMethod("restoreOnProjectReopen", Boolean::class.javaPrimitiveType)
+            .invoke(builder, false) as? TerminalToolWindowTabBuilder ?: builder
+    } catch (e: Exception) {
+        thisLogger().debug("restoreOnProjectReopen is unavailable", e)
+        builder
     }
 
     private fun isAlive(tab: TerminalToolWindowTab): Boolean = try {

@@ -20,6 +20,19 @@ object TabsRestore {
         active: (String) -> Boolean,
     ): Plan = split(ids) { exists(it) && !archived(it) && !active(it) }
 
+    /**
+     * Сессию сейчас ведёт другой claude (вне этой IDE), и второй `--resume` запускать нельзя: сырой live-статус
+     * активный ([statusActive] — именно `status.active`, а не effectiveStatus: ожидание разрешения не «протухает»)
+     * и последнее событие пришло позже закрытия проекта [closedAt] + [CLOSE_GRACE_MS]. Наш claude, убитый вместе
+     * с IDE, обычно остаётся «работает» с событиями до закрытия — такую сессию восстанавливаем.
+     * [closedAt] = 0 (неизвестно) — по live-статусу не пропускаем.
+     */
+    fun runningElsewhere(statusActive: Boolean, updatedAt: Long, closedAt: Long): Boolean =
+        closedAt > 0 && statusActive && updatedAt > closedAt + CLOSE_GRACE_MS
+
+    /** Пока IDE выходит, наш claude ещё успевает писать события — их не считаем чужой работой. */
+    const val CLOSE_GRACE_MS = 20_000L
+
     /** Вкладки транскриптов: только по наличию файла (транскрипт архивной или работающей сессии открыть можно). */
     fun transcripts(ids: List<String>, exists: (String) -> Boolean): Plan = split(ids, exists)
 

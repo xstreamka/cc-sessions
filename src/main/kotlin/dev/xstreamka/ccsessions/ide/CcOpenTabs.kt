@@ -45,11 +45,14 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
         var transcripts: MutableList<String> = ArrayList()
         /** Панель CC Sessions была видна, когда проект закрывали. */
         var panelVisible: Boolean = false
+        /** Когда проект закрывали (epoch ms, 0 — неизвестно), см. [closedAt]. */
+        var closedAt: Long = 0
     }
 
     @Volatile private var sessions: List<String> = emptyList()
     @Volatile private var transcripts: List<String> = emptyList()
     @Volatile private var panelVisible = false
+    @Volatile private var closedAt = 0L
 
     /**
      * Проект закрывается — ставится в `projectClosing`, а не в `projectClosingBeforeSave`: после beforeSave закрытие
@@ -71,12 +74,14 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
         it.sessions = ArrayList(sessions)
         it.transcripts = ArrayList(transcripts)
         it.panelVisible = panelVisible
+        it.closedAt = closedAt
     }
 
     override fun loadState(state: S) {
         sessions = OpenTabsList.normalized(state.sessions)
         transcripts = OpenTabsList.normalized(state.transcripts)
         panelVisible = state.panelVisible
+        closedAt = state.closedAt
     }
 
     /** Проект закрывается или IDE выходит: вкладки закрывает платформа, а не пользователь. */
@@ -115,6 +120,7 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
     /** В `projectClosingBeforeSave` (окна ещё живы, сохранение впереди): что сейчас на экране, то и вернём. */
     fun snapshotBeforeSave() {
         if (project.isDisposed) return
+        closedAt = System.currentTimeMillis()
         val tw = ToolWindowManager.getInstance(project).getToolWindow(SessionsToolWindowFactory.ID) ?: return
         // Пишем сразу (без invokeLater), чтобы значение попало в сохранение, которое идёт следом; запись одного volatile-поля
         panelVisible = tw.isVisible
@@ -126,7 +132,8 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
     }
 
     /**
-     * Убрать из списков то, что при восстановлении пропущено (транскрипта нет, сессия в архиве или уже работает).
+     * Убрать из списков то, что при восстановлении пропущено (транскрипта нет, сессия в архиве или уже работает),
+     * или всё сохранённое, когда восстановление выключено в настройках.
      * Как и остальные удаления — отложенно и не во время закрытия проекта; [sessionOpen]/[transcriptOpen]
      * перепроверяются на EDT: если вкладку за это время открыли, запись остаётся.
      */
@@ -147,6 +154,13 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
     fun sessions(): List<String> = sessions
     fun transcripts(): List<String> = transcripts
     fun panelVisible(): Boolean = panelVisible
+
+    /**
+     * Время закрытия проекта в прошлом запуске (ставится в [snapshotBeforeSave]); 0 — неизвестно. По нему отличаем
+     * claude, убитый вместе с IDE, от сессии, которую сейчас ведёт другой claude. После падения IDE (закрытия не было)
+     * здесь остаётся время более раннего закрытия — тогда сессия с живыми событиями может быть пропущена; это принято.
+     */
+    fun closedAt(): Long = closedAt
 
     /** Добавления — сразу, если уже на EDT (так их увидит ближайшее сохранение), иначе через invokeLater. */
     private fun onEdt(block: () -> Unit) {
@@ -196,6 +210,8 @@ class CcOpenTabsProjectCloseListener : ProjectCloseListener {
 
     override fun projectClosing(project: Project) {
         CcOpenTabs.ifCreated(project)?.markClosing()
+        // Проект в этой IDE откроют снова — восстановление должно сработать ещё раз
+        CcRestore.clearRestoredMarker(project)
     }
 }
 

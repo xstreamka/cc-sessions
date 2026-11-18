@@ -22,6 +22,14 @@ import java.nio.file.Paths
  * EDT, когда окна инструментов проекта уже зарегистрированы ([ToolWindowManager.invokeLater]). Уведомлений нет;
  * ошибки — только в лог. Открытые заново вкладки записываются в [CcOpenTabs] обычным путём — без дублей, в том же
  * порядке; пропущенные id из сохранённых списков убираются.
+ *
+ * Восстановление идёт один раз на открытие проекта: отметка в системных свойствах JVM переживает перезагрузку
+ * плагина (динамическое обновление) — иначе во вкладки, пережившие перезагрузку, запустился бы второй
+ * `claude --resume`. Отметка снимается при закрытии проекта ([clearRestoredMarker]), чтобы при повторном открытии
+ * в той же IDE восстановление сработало снова.
+ *
+ * Настройка выключена — ничего не открываем, а сохранённые списки сессий и транскриптов очищаем: иначе, включив
+ * настройку позже, пользователь получил бы давно закрытые сессии. Видимость панели по-прежнему отслеживается.
  */
 object CcRestore {
     private val LOG = logger<CcRestore>()
@@ -31,18 +39,50 @@ object CcRestore {
 
     /** Вызывать из [CcStartup] после запуска индекса и live-статусов. */
     fun start(project: Project) {
-        if (!CcSettings.get().restoreOnStartup) return
+        if (!markRestored(project)) return
         val tabs = CcOpenTabs.getIfAlive(project) ?: return
         // Снимок до того, как восстановленные вкладки начнут записываться снова
         val sessionIds = tabs.sessions()
         val transcriptIds = tabs.transcripts()
+        if (!CcSettings.get().restoreOnStartup) {
+            forget(project, tabs, sessionIds, transcriptIds)
+            return
+        }
+        val closedAt = tabs.closedAt()
         if (tabs.panelVisible()) {
             ToolWindowManager.getInstance(project).invokeLater { safely("panel") { showPanel(project) } }
         }
         if (sessionIds.isEmpty() && transcriptIds.isEmpty()) return
         AppExecutorUtil.getAppExecutorService().execute {
-            safely("tabs") { restoreTabs(project, tabs, sessionIds, transcriptIds) }
+            safely("tabs") { restoreTabs(project, tabs, sessionIds, transcriptIds, closedAt) }
         }
+    }
+
+    /** Снять отметку «уже восстанавливали» (закрытие проекта). */
+    fun clearRestoredMarker(project: Project) {
+        System.clearProperty(markerKey(project))
+    }
+
+    /** true — в этом открытии проекта восстановления ещё не было (и теперь отмечено). */
+    private fun markRestored(project: Project): Boolean = synchronized(this) {
+        val key = markerKey(project)
+        if (System.getProperty(key) != null) return false
+        System.setProperty(key, "1")
+        true
+    }
+
+    private fun markerKey(project: Project) = "cc-sessions.restored." + project.locationHash
+
+    /** Убрать id из сохранённых списков, кроме тех, чья вкладка к этому моменту открыта (проверка — на EDT). */
+    private fun forget(project: Project, tabs: CcOpenTabs, sessionIds: Collection<String>, transcriptIds: Collection<String>) {
+        val launcher = TerminalLauncher.get(project)
+        tabs.forget(
+            sessionIds, transcriptIds,
+            sessionOpen = launcher::hasOpenTab,
+            transcriptOpen = { id ->
+                FileEditorManager.getInstance(project).openFiles.any { it is TranscriptVirtualFile && it.sessionId == id }
+            },
+        )
     }
 
     /** Показать панель без кражи фокуса у редактора (show, а не activate). */
@@ -53,13 +93,16 @@ object CcRestore {
     }
 
     /** Фон: сводки, проверки и план; затем открытие вкладок на EDT. */
-    private fun restoreTabs(project: Project, tabs: CcOpenTabs, sessionIds: List<String>, transcriptIds: List<String>) {
+    private fun restoreTabs(
+        project: Project, tabs: CcOpenTabs, sessionIds: List<String>, transcriptIds: List<String>, closedAt: Long,
+    ) {
         if (project.isDisposed) return
         val svc = SessionsService.get(project)
         val scanned = svc.awaitFirstScan(FIRST_SCAN_WAIT_MS)
         if (!scanned) LOG.info("first session scan is not finished, restoring from transcript files")
         if (project.isDisposed) return
-        val meta: Map<String, SessionMeta> = if (scanned) svc.meta else try {
+        // Скан не дождались или он упал до чтения меты (мета пуста) — читаем её сами: нужна для проверки архива
+        val meta: Map<String, SessionMeta> = svc.meta.takeIf { scanned && it.isNotEmpty() } ?: try {
             CcData.meta.all()
         } catch (e: Exception) {
             LOG.warn("cannot read session meta", e)
@@ -80,7 +123,8 @@ object CcRestore {
             // Пустую сессию (ни одного сообщения) claude не продолжит — считаем, что её нет
             exists = { id -> summary(id)?.isEmpty == false },
             archived = { id -> meta[id]?.archived == true || summary(id)?.archivedInAir == true },
-            active = { id -> live.state(id)?.effectiveStatus()?.active == true },
+            // Активна по live-статусу только с событиями после закрытия проекта — иначе это наш claude, убитый с IDE
+            active = { id -> live.state(id)?.let { TabsRestore.runningElsewhere(it.status.active, it.updatedAt, closedAt) } == true },
         )
         val transcriptPlan = TabsRestore.transcripts(transcriptIds, exists = { id -> transcriptFile(svc, id) != null })
         val toResume = sessionPlan.restore.mapNotNull { id -> summary(id) }
@@ -91,13 +135,7 @@ object CcRestore {
         ToolWindowManager.getInstance(project).invokeLater {
             if (project.isDisposed) return@invokeLater
             val launcher = TerminalLauncher.get(project)
-            tabs.forget(
-                sessionPlan.drop, transcriptPlan.drop,
-                sessionOpen = launcher::hasOpenTab,
-                transcriptOpen = { id ->
-                    FileEditorManager.getInstance(project).openFiles.any { it is TranscriptVirtualFile && it.sessionId == id }
-                },
-            )
+            forget(project, tabs, sessionPlan.drop, transcriptPlan.drop)
             for (id in transcriptPlan.restore) {
                 safely("transcript $id") { TranscriptEditorProvider.open(project, id) }
             }
