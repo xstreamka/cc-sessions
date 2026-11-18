@@ -54,7 +54,7 @@ internal fun JsonElement?.flattenText(limit: Int = Int.MAX_VALUE): String {
                 val o = e.asJsonObject
                 when (o.str("type")) {
                     "text" -> sb.append(o.str("text") ?: "")
-                    "image" -> sb.append("[изображение]")
+                    "image" -> sb.append(I18n.msg("content.image"))
                     "tool_reference" -> sb.append("[").append(o.str("tool_name") ?: "tool").append("]")
                     else -> sb.append(compactGson.toJson(o))
                 }

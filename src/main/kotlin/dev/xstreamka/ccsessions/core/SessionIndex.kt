@@ -39,14 +39,16 @@ data class SessionSummary(
         get() = listOf(customTitle?.removePrefix(AIR_ARCHIVED_PREFIX), aiTitle, summaryTitle)
             .firstOrNull { !it.isNullOrBlank() }
             ?: firstPrompt?.takeIf { it.isNotBlank() }?.let { oneLine(it, 120) }
-            ?: "(пустая сессия ${id.take(8)})"
+            ?: emptyTitle()
 
     /** Заголовок по приоритету: имя /rename (без префикса архива Air) → AI-заголовок → summary → первый промпт. */
     val title: String
         get() = listOf(customTitle?.removePrefix(AIR_ARCHIVED_PREFIX), aiTitle, summaryTitle, firstPrompt)
             .firstOrNull { !it.isNullOrBlank() }
             ?.let { oneLine(it, 120) }
-            ?: "(пустая сессия ${id.take(8)})"
+            ?: emptyTitle()
+
+    private fun emptyTitle() = I18n.msg("session.empty", id.take(8))
 
     val isEmpty: Boolean get() = prompts == 0 && assistantMessages == 0
     val isSdk: Boolean get() = entrypoint?.startsWith("sdk") == true
@@ -111,7 +113,7 @@ class SessionAccumulator(private val sessionId: String) {
                 when (val c = Lines.classifyUserText(text, images)) {
                     is Lines.Prompt -> {
                         prompts++
-                        val t = c.text.ifBlank { "[изображение]" }
+                        val t = c.text.ifBlank { I18n.msg("content.image") }
                         if (firstPrompt == null) firstPrompt = t
                         lastPrompt = t
                     }

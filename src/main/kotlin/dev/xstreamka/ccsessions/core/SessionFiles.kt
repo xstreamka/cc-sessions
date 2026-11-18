@@ -41,7 +41,7 @@ object SessionFiles {
 
     /** Удаляет [items] (папки — рекурсивно). Всё, что вне каталога Claude, — IllegalArgumentException, ничего не удаляется. */
     fun delete(paths: ClaudePaths, items: List<Path>) {
-        items.forEach { require(isInside(paths.configDir, it)) { "путь вне каталога Claude: $it" } }
+        items.forEach { require(isInside(paths.configDir, it)) { I18n.msg("error.pathOutsideClaude", it.toString()) } }
         for (p in items) {
             if (!Files.exists(p)) continue
             if (Files.isDirectory(p)) {

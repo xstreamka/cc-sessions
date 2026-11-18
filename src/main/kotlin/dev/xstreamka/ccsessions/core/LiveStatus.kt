@@ -49,15 +49,18 @@ data class LiveEvent(
     }
 }
 
-enum class LiveStatus(val label: String, val active: Boolean) {
-    WORKING("думает", true),
-    TOOL("выполняет", true),
-    COMPACTING("сжимает контекст", true),
-    WAITING_PERMISSION("ждёт разрешения", true),
-    IDLE("ждёт ввода", false),
-    ERROR("ошибка", false),
-    ENDED("завершена", false),
-    STALE("нет событий", false),
+enum class LiveStatus(private val key: String, val active: Boolean) {
+    WORKING("live.status.working", true),
+    TOOL("live.status.tool", true),
+    COMPACTING("live.status.compacting", true),
+    WAITING_PERMISSION("live.status.waitingPermission", true),
+    IDLE("live.status.idle", false),
+    ERROR("live.status.error", false),
+    ENDED("live.status.ended", false),
+    STALE("live.status.stale", false);
+
+    /** Подпись статуса в текущей локали. */
+    val label: String get() = I18n.msg(key)
 }
 
 data class LiveState(
@@ -84,11 +87,11 @@ data class LiveState(
         val st = effectiveStatus(now)
         val base = when (st) {
             LiveStatus.TOOL -> listOfNotNull(tool, toolSummary).joinToString(": ").ifEmpty { st.label }
-            LiveStatus.WAITING_PERMISSION -> "ждёт разрешения" + (tool?.let { ": $it" } ?: "") + (toolSummary?.let { " — $it" } ?: "")
-            LiveStatus.ERROR -> "ошибка" + (error?.let { ": $it" } ?: "")
+            LiveStatus.WAITING_PERMISSION -> st.label + (tool?.let { ": $it" } ?: "") + (toolSummary?.let { " — $it" } ?: "")
+            LiveStatus.ERROR -> st.label + (error?.let { ": $it" } ?: "")
             else -> st.label
         }
-        val sub = if (activeSubagents > 0 && st.active) " · субагентов: $activeSubagents" else ""
+        val sub = if (activeSubagents > 0 && st.active) " · " + I18n.msg("live.subagents", activeSubagents) else ""
         return base + sub
     }
 }
@@ -113,7 +116,7 @@ object LiveReducer {
             "SessionStart" -> to(LiveStatus.IDLE) { it.copy(tool = null, toolSummary = null, error = null, activeSubagents = 0) }
             "UserPromptSubmit" -> to(LiveStatus.WORKING) { it.copy(lastPrompt = ev.prompt ?: it.lastPrompt, tool = null, toolSummary = null, error = null) }
             "PreToolUse" -> to(LiveStatus.TOOL) {
-                val tool = if (fromSubagent) "${ev.agentType ?: "субагент"} › ${ev.toolName}" else ev.toolName
+                val tool = if (fromSubagent) "${ev.agentType ?: I18n.msg("live.subagent")} › ${ev.toolName}" else ev.toolName
                 it.copy(tool = tool, toolSummary = ev.toolSummary)
             }
             "PermissionRequest" -> to(LiveStatus.WAITING_PERMISSION) { it.copy(tool = ev.toolName ?: it.tool, toolSummary = ev.toolSummary ?: it.toolSummary) }

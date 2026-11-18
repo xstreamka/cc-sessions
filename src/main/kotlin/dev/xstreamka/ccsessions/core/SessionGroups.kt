@@ -5,8 +5,11 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-enum class DayGroup(val title: String) {
-    FAVORITES("Избранное"), TODAY("Сегодня"), YESTERDAY("Вчера"), THIS_WEEK("На этой неделе"), EARLIER("Ранее")
+enum class DayGroup(private val key: String) {
+    FAVORITES("group.favorites"), TODAY("group.today"), YESTERDAY("group.yesterday"), THIS_WEEK("group.thisWeek"), EARLIER("group.earlier");
+
+    /** Заголовок группы в текущей локали. */
+    val title: String get() = I18n.msg(key)
 }
 
 object SessionGroups {

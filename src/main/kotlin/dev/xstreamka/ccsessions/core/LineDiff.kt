@@ -53,11 +53,11 @@ object LineDiff {
         var skipped = 0
         for (i in lines.indices) {
             if (keep[i]) {
-                if (skipped > 0) { out += Line(Op.SKIP, "… $skipped без изменений"); skipped = 0 }
+                if (skipped > 0) { out += Line(Op.SKIP, I18n.msg("diff.unchanged", skipped)); skipped = 0 }
                 out += lines[i]
             } else skipped++
         }
-        if (skipped > 0) out += Line(Op.SKIP, "… $skipped без изменений")
+        if (skipped > 0) out += Line(Op.SKIP, I18n.msg("diff.unchanged", skipped))
         return out
     }
 

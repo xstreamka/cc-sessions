@@ -144,7 +144,7 @@ object TranscriptParser {
                     val content = o.str("content") ?: o.str("message")
                     val sub = o.str("subtype")
                     when {
-                        sub == "compact_boundary" -> items += TItem.Note(ts, NoteKind.COMPACT, "Контекст сжат (/compact)")
+                        sub == "compact_boundary" -> items += TItem.Note(ts, NoteKind.COMPACT, I18n.msg("note.compacted"))
                         !content.isNullOrBlank() -> {
                             val kind = if (o.str("level") == "error") NoteKind.ERROR else NoteKind.SYSTEM
                             items += TItem.Note(ts, kind, content.lineSequence().first().take(200), content)
@@ -159,7 +159,7 @@ object TranscriptParser {
     private fun parseUser(o: JsonObject, ts: Instant?, items: MutableList<TItem>, calls: Map<String, TItem.ToolCall>) {
         val msg = o.obj("message")
         if (o.bool("isCompactSummary")) {
-            items += TItem.Note(ts, NoteKind.COMPACT, "Сводка после сжатия контекста", Lines.userText(msg)?.first.orEmpty())
+            items += TItem.Note(ts, NoteKind.COMPACT, I18n.msg("note.compactSummary"), Lines.userText(msg)?.first.orEmpty())
             return
         }
         // tool_result → привязываем к вызову
@@ -184,12 +184,12 @@ object TranscriptParser {
                 val kind = if (c.tag.startsWith("bash")) NoteKind.SHELL else NoteKind.COMMAND_OUTPUT
                 val title = when (c.tag) {
                     "bash-input" -> "$ " + c.body.lineSequence().first()
-                    "bash-stdout", "bash-stderr" -> "вывод shell"
-                    else -> "вывод команды"
+                    "bash-stdout", "bash-stderr" -> I18n.msg("note.shellOutput")
+                    else -> I18n.msg("note.commandOutput")
                 }
                 if (c.body.isNotBlank() || c.tag == "bash-input") items += TItem.Note(ts, kind, title, if (c.tag == "bash-input") "" else c.body)
             }
-            Lines.Interrupt -> items += TItem.Note(ts, NoteKind.INTERRUPT, "Прервано пользователем")
+            Lines.Interrupt -> items += TItem.Note(ts, NoteKind.INTERRUPT, I18n.msg("note.interrupted"))
             Lines.Skip -> {}
         }
     }
@@ -199,7 +199,7 @@ object TranscriptParser {
         val model = msg.str("model")
         if (o.bool("isApiErrorMessage")) {
             val text = msg.get("content").flattenText(2000)
-            items += TItem.Note(ts, NoteKind.ERROR, "Ошибка API", text)
+            items += TItem.Note(ts, NoteKind.ERROR, I18n.msg("note.apiError"), text)
             return
         }
         val content = msg.get("content") ?: return

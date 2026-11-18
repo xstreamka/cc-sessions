@@ -22,6 +22,12 @@ object I18n {
 
     fun locale(): Locale = localeProvider()
 
+    /**
+     * Локаль для дат и атрибута `lang`: русская — для `ru`, иначе английская (тексты тогда из базового файла).
+     * [Locale.ROOT] не годится для DateTimeFormatter — месяцы вышли бы вида «M11».
+     */
+    fun formatLocale(): Locale = locale().takeIf { it.language == "ru" } ?: Locale.ENGLISH
+
     /** Строка по ключу в текущей локали; [args] — через MessageFormat. Нет ключа — вернуть сам ключ (не падать). */
     fun msg(key: String, vararg args: Any?): String {
         val pattern = try {

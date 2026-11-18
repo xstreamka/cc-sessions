@@ -365,8 +365,13 @@ class CoreTest {
 
     @Test
     fun htmlDocument() {
+        withLocale(java.util.Locale.of("ru")) { htmlDocumentRu() }
+    }
+
+    private fun htmlDocumentRu() {
         val t = parse()
         val html = TranscriptHtml().document(t, TranscriptHtml.Options(dark = true, alias = "Мой алиас", live = "думает"))
+        assertTrue(html.contains("<html lang=\"ru\">"))
         assertTrue(html.contains("<h1>Мой алиас</h1>"))
         assertTrue(html.contains("data-file=\"/home/u/proj/src/Order.php\""))
         // ссылка только на имени файла: клик по пути к папке и остальной строке раскрывает блок
@@ -379,6 +384,57 @@ class CoreTest {
         val md = MarkdownExport.export(t)
         assertTrue(md.startsWith("# csv-export"))
         assertTrue(md.contains("```diff"))
+        assertTrue(md.contains("- Промптов: 2, вызовов инструментов: 4"))
+    }
+
+    @Test
+    fun htmlDocumentEnglish() {
+        withLocale(java.util.Locale.ROOT) { htmlDocumentEn() }
+    }
+
+    private fun htmlDocumentEn() {
+        val t = parse()
+        val html = TranscriptHtml(zone = utc).document(t, TranscriptHtml.Options(dark = true, live = "thinking"))
+        assertTrue(html.contains("<html lang=\"en\">"))
+        listOf(
+            "<i>now</i>", "<i>branch</i>", "<i>model</i>", "<i>prompts</i>", "<i>tools</i>",
+            "<i>started</i>17 Nov 2026, 09:00", "<div class=\"day\">17 November 2026</div>",
+            "placeholder=\"Search transcript…\"", "Nothing found", "tasks 1/2", "running", "<div class=\"who\">You ",
+            "Interrupted by user", "Context compacted (/compact)",
+        ).forEach { assertTrue("no «$it» in English transcript", html.contains(it)) }
+        // Кириллица допустима только из текста самой фикстуры (сообщения), не из служебных подписей
+        val fixtureText = Files.readString(fixture())
+        val cyr = Regex("[А-Яа-яЁё]+")
+        val stray = cyr.findAll(html).map { it.value }.filter { it !in fixtureText }.toSet()
+        assertTrue("Cyrillic outside fixture messages: $stray", stray.isEmpty())
+
+        val md = MarkdownExport.export(t, o = MarkdownExport.Options(zone = utc))
+        listOf("- Session: `", "- Branch: `feature/x`", "- Prompts: 2, tool calls: 4", "## 🧑 You").forEach {
+            assertTrue("no «$it» in English Markdown", md.contains(it))
+        }
+        val mdStray = cyr.findAll(md).map { it.value }.filter { it !in fixtureText }.toSet()
+        assertTrue("Cyrillic outside fixture messages in Markdown: $mdStray", mdStray.isEmpty())
+    }
+
+    @Test
+    fun coreLabelsFollowLocale() {
+        val perm = LiveState("s", LiveStatus.WAITING_PERMISSION, 0, 0, tool = "Bash", toolSummary = "rm -rf x", activeSubagents = 2)
+        withLocale(java.util.Locale.ROOT) {
+            assertEquals("Today", DayGroup.TODAY.title)
+            assertEquals("Favorites", DayGroup.FAVORITES.title)
+            assertEquals("thinking", LiveStatus.WORKING.label)
+            assertEquals("waiting for permission: Bash — rm -rf x · subagents: 2", perm.describe(0))
+            assertEquals("(empty session 12345678)", SessionSummary("1234567890").title)
+            assertEquals("… 8 unchanged", LineDiff.collapse(LineDiff.diff((1..12).joinToString("\n"), (1..11).joinToString("\n") + "\nX"))[0].text)
+        }
+        withLocale(java.util.Locale.of("ru")) {
+            assertEquals("Сегодня", DayGroup.TODAY.title)
+            assertEquals("Избранное", DayGroup.FAVORITES.title)
+            assertEquals("думает", LiveStatus.WORKING.label)
+            assertEquals("ждёт разрешения: Bash — rm -rf x · субагентов: 2", perm.describe(0))
+            assertEquals("(пустая сессия 12345678)", SessionSummary("1234567890").title)
+            assertEquals("… 8 без изменений", LineDiff.collapse(LineDiff.diff((1..12).joinToString("\n"), (1..11).joinToString("\n") + "\nX"))[0].text)
+        }
     }
 
     @Test

@@ -27,11 +27,14 @@ class TranscriptHtml(
     )
 
     private val timeFmt = DateTimeFormatter.ofPattern("HH:mm:ss")
-    private val dateFmt = DateTimeFormatter.ofPattern("d MMMM yyyy", java.util.Locale.forLanguageTag("ru"))
-    private val fullFmt = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", java.util.Locale.forLanguageTag("ru"))
+    // Месяцы — по языку плагина: «18 November 2026» / «18 ноября 2026»
+    private fun dateFmt() = DateTimeFormatter.ofPattern("d MMMM yyyy", I18n.formatLocale())
+    private fun fullFmt() = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", I18n.formatLocale())
+
+    private fun msg(key: String, vararg args: Any?) = I18n.msg(key, *args)
 
     fun document(t: Transcript, o: Options): String = buildString {
-        append("<!DOCTYPE html><html lang=\"ru\"><head><meta charset=\"utf-8\">")
+        append("<!DOCTYPE html><html lang=\"").append(I18n.formatLocale().language).append("\"><head><meta charset=\"utf-8\">")
         append("<style>:root{--font:").append(o.fontFamily).append(";--mono:").append(o.monoFamily)
             .append(";--size:").append(o.fontSize).append("px}</style>")
         append("<style>").append(o.css).append("</style></head>")
@@ -39,21 +42,21 @@ class TranscriptHtml(
         append(toolbar())
         append("<header id=\"hdr\">").append(header(t.summary, o)).append("</header>")
         append("<main id=\"items\">").append(items(t)).append("</main>")
-        append("<div id=\"empty-search\" hidden>Ничего не найдено</div>")
+        append("<div id=\"empty-search\" hidden>").append(esc(msg("transcript.search.empty"))).append("</div>")
         append("<script>").append(o.js).append("</script></body></html>")
     }
 
     private fun toolbar() = """
         <nav id="bar">
-          <input id="q" type="search" placeholder="Поиск по транскрипту…" autocomplete="off">
-          <label><input type="checkbox" id="f-thinking" checked> мысли</label>
-          <label><input type="checkbox" id="f-tools" checked> инструменты</label>
-          <label><input type="checkbox" id="f-only-prompts"> только промпты</label>
+          <input id="q" type="search" placeholder="${esc(msg("transcript.search.placeholder"))}" autocomplete="off">
+          <label><input type="checkbox" id="f-thinking" checked> ${esc(msg("transcript.filter.thinking"))}</label>
+          <label><input type="checkbox" id="f-tools" checked> ${esc(msg("transcript.filter.tools"))}</label>
+          <label><input type="checkbox" id="f-only-prompts"> ${esc(msg("transcript.filter.onlyPrompts"))}</label>
           <span class="sp"></span>
-          <button id="b-expand" title="Развернуть все">⊞</button>
-          <button id="b-collapse" title="Свернуть все">⊟</button>
-          <button id="b-top" title="В начало">↑</button>
-          <button id="b-bottom" title="В конец">↓</button>
+          <button id="b-expand" title="${esc(msg("transcript.button.expandAll"))}">⊞</button>
+          <button id="b-collapse" title="${esc(msg("transcript.button.collapseAll"))}">⊟</button>
+          <button id="b-top" title="${esc(msg("transcript.button.top"))}">↑</button>
+          <button id="b-bottom" title="${esc(msg("transcript.button.bottom"))}">↓</button>
         </nav>
     """.trimIndent()
 
@@ -65,23 +68,25 @@ class TranscriptHtml(
             if (value.isNullOrBlank()) return
             append("<span class=\"chip $cls\"><i>").append(esc(label)).append("</i>").append(esc(value)).append("</span>")
         }
-        o.live?.let { chip("сейчас", it, "live") }
-        chip("ветка", s.gitBranch)
-        chip("модель", s.model?.removePrefix("claude-"))
-        chip("промптов", s.prompts.toString())
-        chip("инструментов", s.toolCalls.toString())
-        if (s.lastContext > 0) chip("контекст", fmtTokens(s.lastContext))
-        if (s.usage.output > 0) chip("вывод", fmtTokens(s.usage.output))
-        s.createdAt?.let { chip("начата", fullFmt.format(it.atZone(zone))) }
-        s.updatedAt?.let { chip("активность", fullFmt.format(it.atZone(zone))) }
+        val fullFmt = fullFmt()
+        o.live?.let { chip(msg("transcript.chip.live"), it, "live") }
+        chip(msg("transcript.chip.branch"), s.gitBranch)
+        chip(msg("transcript.chip.model"), s.model?.removePrefix("claude-"))
+        chip(msg("transcript.chip.prompts"), s.prompts.toString())
+        chip(msg("transcript.chip.tools"), s.toolCalls.toString())
+        if (s.lastContext > 0) chip(msg("transcript.chip.context"), fmtTokens(s.lastContext))
+        if (s.usage.output > 0) chip(msg("transcript.chip.output"), fmtTokens(s.usage.output))
+        s.createdAt?.let { chip(msg("transcript.chip.started"), fullFmt.format(it.atZone(zone))) }
+        s.updatedAt?.let { chip(msg("transcript.chip.activity"), fullFmt.format(it.atZone(zone))) }
         append("</div><div class=\"meta sub\">")
         append("<span class=\"mono sel\">").append(esc(s.id)).append("</span>")
         s.cwd?.let { append(" · <span class=\"mono\">").append(esc(it)).append("</span>") }
-        s.forkedFrom?.let { append(" · ответвлена от <span class=\"mono\">").append(esc(it.take(8))).append("</span>") }
+        s.forkedFrom?.let { append(" · ").append(esc(msg("transcript.forkedFrom"))).append(" <span class=\"mono\">").append(esc(it.take(8))).append("</span>") }
         append("</div>")
     }
 
     fun items(t: Transcript): String = buildString {
+        val dateFmt = dateFmt()
         var day: LocalDate? = null
         var n = 0
         for (item in t.items) {
@@ -96,7 +101,7 @@ class TranscriptHtml(
                 is TItem.SlashCommand -> append(row("cmd", n, item.ts, "<span class=\"slash\">${esc(item.command)}</span> ${esc(item.args)}"))
                 is TItem.AssistantText -> append(row("assistant", n, item.ts, Markdown.toHtml(item.text, ::fileAttr)))
                 is TItem.Thinking -> append(
-                    "<details class=\"item thinking\" id=\"i$n\"><summary>${time(item.ts)}<span class=\"lbl\">мысли</span>" +
+                    "<details class=\"item thinking\" id=\"i$n\"><summary>${time(item.ts)}<span class=\"lbl\">${esc(msg("transcript.item.thinking"))}</span>" +
                         "<span class=\"preview\">${esc(SessionSummary.oneLine(item.text, 140))}</span></summary>" +
                         "<div class=\"body md\">${Markdown.toHtml(item.text, ::fileAttr)}</div></details>"
                 )
@@ -104,13 +109,13 @@ class TranscriptHtml(
                 is TItem.Note -> note(item, n)
             }
         }
-        if (t.items.isEmpty()) append("<div class=\"empty\">В транскрипте пока нет сообщений</div>")
+        if (t.items.isEmpty()) append("<div class=\"empty\">").append(esc(msg("transcript.empty"))).append("</div>")
     }
 
     private fun StringBuilder.prompt(p: TItem.UserPrompt, n: Int) {
-        val img = if (p.images > 0) "<div class=\"img\">🖼 изображений: ${p.images}</div>" else ""
+        val img = if (p.images > 0) "<div class=\"img\">🖼 ${esc(msg("transcript.prompt.images", p.images))}</div>" else ""
         append("<section class=\"item user\" id=\"i$n\" data-kind=\"prompt\">")
-        append("<div class=\"who\">Вы ${time(p.ts)}</div>")
+        append("<div class=\"who\">${esc(msg("transcript.prompt.you"))} ${time(p.ts)}</div>")
         append("<div class=\"body md\">").append(Markdown.toHtml(p.text, ::fileAttr)).append(img).append("</div></section>")
     }
 
@@ -142,8 +147,8 @@ class TranscriptHtml(
         append("><summary>").append(time(c.ts))
         append("<span class=\"tname\">").append(esc(prettyToolName(c.name))).append("</span>")
         append("<span class=\"tsum\">").append(title).append("</span>")
-        if (state == "pending") append("<span class=\"badge run\">выполняется</span>")
-        if (state == "error") append("<span class=\"badge err\">ошибка</span>")
+        if (state == "pending") append("<span class=\"badge run\">").append(esc(msg("transcript.tool.running"))).append("</span>")
+        if (state == "error") append("<span class=\"badge err\">").append(esc(msg("transcript.tool.error"))).append("</span>")
         append("</summary><div class=\"tbody\">").append(body).append("</div></details>")
     }
 
@@ -174,7 +179,7 @@ class TranscriptHtml(
                     val eo = e.asJsonObject
                     val d = LineDiff.diff(eo.str("old_string").orEmpty(), eo.str("new_string").orEmpty())
                     val (a, dl) = LineDiff.stats(d); add += a; del += dl
-                    sb.append("<div class=\"sub\">правка ${idx + 1}</div>").append(diffHtml(d))
+                    sb.append("<div class=\"sub\">${esc(msg("transcript.multiEdit.edit", idx + 1))}</div>").append(diffHtml(d))
                 }
                 Parts(fileLink(path) + stat(add, del), sb.toString() + errorOnly(r))
             }
@@ -182,16 +187,16 @@ class TranscriptHtml(
                 val path = i.str("file_path").orEmpty()
                 val content = i.str("content").orEmpty()
                 val lines = content.count { it == '\n' } + 1
-                Parts(fileLink(path) + " <span class=\"dim\">$lines строк</span>", "<pre class=\"code\"><code>${esc(clip(content))}</code></pre>" + errorOnly(r))
+                Parts(fileLink(path) + " <span class=\"dim\">${esc(msg("transcript.lines", lines))}</span>", "<pre class=\"code\"><code>${esc(clip(content))}</code></pre>" + errorOnly(r))
             }
             "Read" -> {
                 val path = i.str("file_path").orEmpty()
-                val range = listOfNotNull(i.long("offset")?.let { "с $it" }, i.long("limit")?.let { "$it строк" }).joinToString(", ")
-                Parts(fileLink(path, i.long("offset")) + (if (range.isNotEmpty()) " <span class=\"dim\">$range</span>" else ""), output(r))
+                val range = listOfNotNull(i.long("offset")?.let { msg("transcript.read.from", it.toString()) }, i.long("limit")?.let { msg("transcript.lines", it) }).joinToString(", ")
+                Parts(fileLink(path, i.long("offset")) + (if (range.isNotEmpty()) " <span class=\"dim\">${esc(range)}</span>" else ""), output(r))
             }
             "Grep", "Glob" -> {
                 val pat = i.str("pattern").orEmpty()
-                val where = i.str("path")?.let { " <span class=\"dim\">в ${esc(it)}</span>" }.orEmpty()
+                val where = i.str("path")?.let { " <span class=\"dim\">${esc(msg("transcript.grep.in", it))}</span>" }.orEmpty()
                 val glob = i.str("glob")?.let { " <span class=\"dim\">${esc(it)}</span>" }.orEmpty()
                 Parts("<code>${esc(pat)}</code>$where$glob", output(r))
             }
@@ -200,8 +205,8 @@ class TranscriptHtml(
                 val type = i.str("subagent_type")
                 val title = listOfNotNull(type?.let { "<span class=\"badge\">${esc(it)}</span>" }, i.str("description")?.let(::esc)).joinToString(" ")
                 val prompt = i.str("prompt").orEmpty()
-                Parts(title, "<div class=\"sub\">задание</div><div class=\"md quote\">${Markdown.toHtml(prompt, ::fileAttr)}</div>" +
-                    (r?.let { "<div class=\"sub\">результат</div><div class=\"md\">${Markdown.toHtml(clip(it.text), ::fileAttr)}</div>" } ?: ""))
+                Parts(title, "<div class=\"sub\">${esc(msg("transcript.task.prompt"))}</div><div class=\"md quote\">${Markdown.toHtml(prompt, ::fileAttr)}</div>" +
+                    (r?.let { "<div class=\"sub\">${esc(msg("transcript.task.result"))}</div><div class=\"md\">${Markdown.toHtml(clip(it.text), ::fileAttr)}</div>" } ?: ""))
             }
             "WebFetch" -> {
                 val url = i.str("url").orEmpty()
@@ -211,8 +216,8 @@ class TranscriptHtml(
             }
             "WebSearch" -> Parts(esc(i.str("query").orEmpty()), output(r))
             "Skill" -> Parts(esc(i.str("skill") ?: i.str("command") ?: ""), output(r))
-            "ExitPlanMode" -> Parts("план", "<div class=\"md\">${Markdown.toHtml(i.str("plan").orEmpty(), ::fileAttr)}</div>" + output(r), open = true)
-            "AskUserQuestion" -> Parts("вопрос пользователю", "<pre class=\"json\">${esc(prettyGson.toJson(i))}</pre>" + output(r))
+            "ExitPlanMode" -> Parts(esc(msg("transcript.tool.plan")), "<div class=\"md\">${Markdown.toHtml(i.str("plan").orEmpty(), ::fileAttr)}</div>" + output(r), open = true)
+            "AskUserQuestion" -> Parts(esc(msg("transcript.tool.askUser")), "<pre class=\"json\">${esc(prettyGson.toJson(i))}</pre>" + output(r))
             else -> {
                 val summary = listOf("description", "file_path", "path", "query", "url", "command", "name")
                     .firstNotNullOfOrNull { i.str(it) }?.let { esc(SessionSummary.oneLine(it, 120)) }.orEmpty()
@@ -224,7 +229,7 @@ class TranscriptHtml(
     private fun output(r: ToolResult?): String {
         if (r == null) return ""
         val text = r.text.trimEnd()
-        if (text.isEmpty()) return "<div class=\"dim\">(пустой вывод)</div>"
+        if (text.isEmpty()) return "<div class=\"dim\">${esc(msg("transcript.output.empty"))}</div>"
         val cls = if (r.isError) "out err" else "out"
         return "<pre class=\"$cls\">${esc(clip(text))}</pre>"
     }
@@ -246,11 +251,11 @@ class TranscriptHtml(
     }
 
     private fun todoTitle(i: JsonObject): String {
-        val todos = i.arr("todos") ?: return "задачи"
+        val todos = i.arr("todos") ?: return esc(msg("transcript.todos"))
         val done = todos.count { it.isJsonObject && it.asJsonObject.str("status") == "completed" }
         val active = todos.firstOrNull { it.isJsonObject && it.asJsonObject.str("status") == "in_progress" }
             ?.asJsonObject?.let { it.str("activeForm") ?: it.str("content") }
-        return "задачи $done/${todos.size()}" + (active?.let { " · <span class=\"dim\">${esc(it)}</span>" } ?: "")
+        return esc(msg("transcript.todos.progress", done, todos.size())) + (active?.let { " · <span class=\"dim\">${esc(it)}</span>" } ?: "")
     }
 
     private fun todos(i: JsonObject): String = buildString {
@@ -279,7 +284,7 @@ class TranscriptHtml(
 
     private fun time(ts: Instant?) = if (ts == null) "" else "<time>${timeFmt.format(ts.atZone(zone))}</time>"
 
-    private fun clip(s: String) = if (s.length <= maxOutputChars) s else s.substring(0, maxOutputChars) + "\n… (обрезано, всего ${s.length} символов)"
+    private fun clip(s: String) = if (s.length <= maxOutputChars) s else s.substring(0, maxOutputChars) + "\n… " + msg("transcript.clipped", s.length)
 
     companion object {
         private val pathLike = Regex("^(~?/|\\./|\\.\\./|[A-Za-z]:\\\\)?[\\w.@~-]+([/\\\\][\\w.@~-]+)*\\.[A-Za-z0-9]{1,8}(:\\d+)?$|^(~?/)[\\w.@~/-]+$")

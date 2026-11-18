@@ -123,7 +123,7 @@ object HooksConfig {
         val text = Files.readString(file)
         if (text.isBlank()) return JsonObject()
         val el = JsonParser.parseString(text)
-        require(el.isJsonObject) { "settings.json: ожидался JSON-объект" }
+        require(el.isJsonObject) { I18n.msg("error.settingsNotObject") }
         return el.asJsonObject
     }
 

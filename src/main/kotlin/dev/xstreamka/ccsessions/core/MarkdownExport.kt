@@ -18,22 +18,25 @@ object MarkdownExport {
         val dt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(o.zone)
         val tm = DateTimeFormatter.ofPattern("HH:mm").withZone(o.zone)
         append("# ").append(alias?.takeIf { it.isNotBlank() } ?: s.title).append("\n\n")
-        append("- Сессия: `").append(s.id).append("`\n")
-        s.cwd?.let { append("- Каталог: `").append(it).append("`\n") }
-        s.gitBranch?.let { append("- Ветка: `").append(it).append("`\n") }
-        s.model?.let { append("- Модель: ").append(it).append("\n") }
-        s.createdAt?.let { append("- Начата: ").append(dt.format(it)).append("\n") }
-        s.updatedAt?.let { append("- Последняя активность: ").append(dt.format(it)).append("\n") }
-        append("- Промптов: ").append(s.prompts).append(", вызовов инструментов: ").append(s.toolCalls).append("\n\n---\n\n")
+        fun field(key: String) = append("- ").append(I18n.msg(key)).append(": ")
+        field("export.session").append("`").append(s.id).append("`\n")
+        s.cwd?.let { field("export.directory").append("`").append(it).append("`\n") }
+        s.gitBranch?.let { field("export.branch").append("`").append(it).append("`\n") }
+        s.model?.let { field("export.model").append(it).append("\n") }
+        s.createdAt?.let { field("export.started").append(dt.format(it)).append("\n") }
+        s.updatedAt?.let { field("export.lastActivity").append(dt.format(it)).append("\n") }
+        append("- ").append(I18n.msg("export.counts", s.prompts, s.toolCalls)).append("\n\n---\n\n")
+        val you = I18n.msg("export.you")
+        val thinking = I18n.msg("export.thinking")
 
         for (item in t.items) {
             val time = item.ts?.let { " · " + tm.format(it) } ?: ""
             when (item) {
-                is TItem.UserPrompt -> append("## 🧑 Вы$time\n\n").append(item.text.trim()).append("\n\n")
+                is TItem.UserPrompt -> append("## 🧑 ").append(you).append(time).append("\n\n").append(item.text.trim()).append("\n\n")
                 is TItem.SlashCommand -> append("> `").append(item.command).append(if (item.args.isNotBlank()) " " + item.args else "").append("`$time\n\n")
                 is TItem.AssistantText -> append("### 🤖 Claude$time\n\n").append(item.text.trim()).append("\n\n")
                 is TItem.Thinking -> if (o.includeThinking) {
-                    append("<details><summary>мысли</summary>\n\n").append(item.text.trim()).append("\n\n</details>\n\n")
+                    append("<details><summary>").append(thinking).append("</summary>\n\n").append(item.text.trim()).append("\n\n</details>\n\n")
                 }
                 is TItem.ToolCall -> tool(item, o)
                 is TItem.Note -> append("> _").append(item.title).append("_\n\n")
@@ -78,7 +81,7 @@ object MarkdownExport {
         val shown = lines.take(maxLines)
         append("\n  ```\n")
         shown.forEach { append("  ").append(it.replace("```", "ˋˋˋ")).append("\n") }
-        if (lines.size > maxLines) append("  … ещё ").append(lines.size - maxLines).append(" строк\n")
+        if (lines.size > maxLines) append("  ").append(I18n.msg("export.moreLines", lines.size - maxLines)).append("\n")
         append("  ```\n\n")
     }
 }
