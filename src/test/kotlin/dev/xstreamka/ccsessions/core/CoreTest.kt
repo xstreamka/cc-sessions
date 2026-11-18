@@ -402,18 +402,95 @@ class CoreTest {
             "placeholder=\"Search transcript…\"", "Nothing found", "tasks 1/2", "running", "<div class=\"who\">You ",
             "Interrupted by user", "Context compacted (/compact)",
         ).forEach { assertTrue("no «$it» in English transcript", html.contains(it)) }
-        // Кириллица допустима только из текста самой фикстуры (сообщения), не из служебных подписей
-        val fixtureText = Files.readString(fixture())
-        val cyr = Regex("[А-Яа-яЁё]+")
-        val stray = cyr.findAll(html).map { it.value }.filter { it !in fixtureText }.toSet()
-        assertTrue("Cyrillic outside fixture messages: $stray", stray.isEmpty())
 
         val md = MarkdownExport.export(t, o = MarkdownExport.Options(zone = utc))
         listOf("- Session: `", "- Branch: `feature/x`", "- Prompts: 2, tool calls: 4", "## 🧑 You").forEach {
             assertTrue("no «$it» in English Markdown", md.contains(it))
         }
-        val mdStray = cyr.findAll(md).map { it.value }.filter { it !in fixtureText }.toSet()
-        assertTrue("Cyrillic outside fixture messages in Markdown: $mdStray", mdStray.isEmpty())
+    }
+
+    /** Вызовы инструментов и служебные записи, на которых видны все подписи транскрипта; [bigOutput] — вывод второго Bash. */
+    private fun toolZoo(bigOutput: String): List<String> {
+        val extra = """{"sessionId": "$sid", "type": "assistant", "uuid": "z1", "timestamp": "2026-11-18T09:00:00.000Z", "message": {"id": "mz", "role": "assistant", "model": "m", "content": [""" +
+            """{"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": "/a/b.kt", "offset": 1200, "limit": 2000}},""" +
+            """{"type": "tool_use", "id": "r2", "name": "Write", "input": {"file_path": "/a/c.kt", "content": "a"}},""" +
+            """{"type": "tool_use", "id": "r3", "name": "MultiEdit", "input": {"file_path": "/a/d.kt", "edits": [{"old_string": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", "new_string": "1\n2\n3\n4\n5\n6\n7\n8\n9\nX"}]}},""" +
+            """{"type": "tool_use", "id": "r4", "name": "Grep", "input": {"pattern": "p", "path": "/src"}},""" +
+            """{"type": "tool_use", "id": "r5", "name": "Task", "input": {"subagent_type": "x", "description": "d", "prompt": "p"}},""" +
+            """{"type": "tool_use", "id": "r6", "name": "ExitPlanMode", "input": {"plan": "p"}},""" +
+            """{"type": "tool_use", "id": "r7", "name": "AskUserQuestion", "input": {"q": 1}},""" +
+            """{"type": "tool_use", "id": "r8", "name": "Bash", "input": {"command": "ls"}},""" +
+            """{"type": "tool_use", "id": "r9", "name": "Bash", "input": {"command": "big"}},""" +
+            """{"type": "tool_use", "id": "r10", "name": "TodoWrite", "input": {}},""" +
+            """{"type": "thinking", "thinking": "hmm"}]}}"""
+        val results = """{"sessionId": "$sid", "type": "user", "uuid": "z2", "timestamp": "2026-11-18T09:00:01.000Z", "message": {"role": "user", "content": [""" +
+            """{"type": "tool_result", "tool_use_id": "r5", "content": "done"},""" +
+            """{"type": "tool_result", "tool_use_id": "r8", "content": ""},""" +
+            """{"type": "tool_result", "tool_use_id": "r9", "content": ${com.google.gson.Gson().toJson(bigOutput)}},""" +
+            """{"type": "tool_result", "tool_use_id": "r2", "is_error": true, "content": [{"type": "image"}]}]}}"""
+        fun user(uuid: String, sec: Int, content: String) =
+            """{"sessionId": "$sid", "type": "user", "uuid": "$uuid", "timestamp": "2026-11-18T09:00:0$sec.000Z", "message": {"role": "user", "content": $content}}"""
+        return listOf(
+            extra, results,
+            user("z3", 2, """[{"type": "text", "text": "see"}, {"type": "image", "source": {}}]"""),
+            user("z4", 3, """"<bash-stdout>out</bash-stdout>""""),
+            user("z5", 4, """"<local-command-stdout>out</local-command-stdout>""""),
+            """{"sessionId": "$sid", "type": "assistant", "uuid": "z6", "isApiErrorMessage": true, "timestamp": "2026-11-18T09:00:05.000Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "boom"}]}}""",
+        )
+    }
+
+    @Test
+    fun englishLabelsHaveNoCyrillic() {
+        withLocale(java.util.Locale.ROOT) {
+            // Кириллицу из сообщений фикстуры заменяем латиницей: тогда любая кириллица в выводе — забытая подпись кода/бандла
+            val lines = Files.readAllLines(fixture()).map { it.replace(Regex("[А-Яа-яЁё]"), "x") } + toolZoo("x\n".repeat(80))
+            val t = TranscriptParser.parse(sid, lines.asSequence())
+            val h = TranscriptHtml(zone = utc, maxOutputChars = 50)
+            val forked = t.summary.copy(forkedFrom = "abcdef1234567")
+            val out = listOf(
+                h.document(t, TranscriptHtml.Options(dark = true, live = LiveStatus.WORKING.label)),
+                h.header(forked, TranscriptHtml.Options(dark = true)),
+                h.items(Transcript(emptyList(), t.summary)),
+                MarkdownExport.export(t, o = MarkdownExport.Options(includeThinking = true, maxOutputLines = 5, zone = utc)),
+                LiveState("s", LiveStatus.WAITING_PERMISSION, 0, 0, tool = "Task", activeSubagents = 2).describe(0),
+                LiveState("s", LiveStatus.ERROR, 0, 0, error = "e").describe(0),
+                SessionSummary("1234567890").title,
+            ) + DayGroup.values().map { it.title } + LiveStatus.values().map { it.label }
+            val all = out.joinToString("\n")
+            val cyr = Regex(".{0,40}[А-Яа-яЁё]+.{0,20}").findAll(all).map { it.value }.toList()
+            assertTrue("Cyrillic in English output: $cyr", cyr.isEmpty())
+            listOf(
+                "from line 1200, 2,000 lines", "1 line", "edit 1", "… 6 unchanged", "in /src", ">prompt<", ">result<", ">plan<",
+                "question for the user", "(empty output)", "(truncated, 159 characters total)", "images: 1", "shell output",
+                "command output", "API error", " · forked from ", "No messages in the transcript yet", "… 75 more lines",
+                "<summary>thinking</summary>", "[image]", "Summary after context compaction", ">tasks<",
+            ).forEach { assertTrue("no «$it» in English output", all.contains(it)) }
+            assertEquals("1 line", I18n.msg("transcript.lines", 1))
+            assertEquals("0 lines", I18n.msg("transcript.lines", 0L))
+            assertEquals("… 1 more line", I18n.msg("export.moreLines", 1))
+            assertEquals("… 2 more lines", I18n.msg("export.moreLines", 2))
+        }
+    }
+
+    @Test
+    fun russianNumbersAreNotGrouped() {
+        withLocale(java.util.Locale.of("ru")) {
+            val lines = Files.readAllLines(fixture()) + toolZoo("y".repeat(40_001))
+            val t = TranscriptParser.parse(sid, lines.asSequence())
+            val html = TranscriptHtml(zone = utc).document(t, TranscriptHtml.Options(dark = false))
+            assertTrue(html.contains("<div class=\"day\">17 ноября 2026</div>"))
+            assertTrue(html.contains("<i>начата</i>17 нояб. 2026, 09:00"))
+            assertTrue(html.contains("… (обрезано, всего 40001 символов)"))
+            assertTrue(html.contains("с 1200, 2000 строк"))
+            assertEquals("2000 строк", I18n.msg("transcript.lines", 2000L))
+            assertEquals("… ещё 1500 строк", I18n.msg("export.moreLines", 1500))
+            assertEquals("… 12345 без изменений", I18n.msg("diff.unchanged", 12345))
+            assertEquals("задачи 1000/2000", I18n.msg("transcript.todos.progress", 1000, 2000))
+            assertEquals("Промптов: 1000, вызовов инструментов: 25000", I18n.msg("export.counts", 1000, 25000))
+            assertEquals("субагентов: 1000", I18n.msg("live.subagents", 1000))
+            assertEquals("изображений: 1000", I18n.msg("transcript.prompt.images", 1000))
+            assertEquals("правка 1000", I18n.msg("transcript.multiEdit.edit", 1000))
+        }
     }
 
     @Test
