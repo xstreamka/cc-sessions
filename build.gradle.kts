@@ -8,6 +8,12 @@ plugins {
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        // Платформа собрана с JVM default-методами: без этого Kotlin генерирует в наших классах заглушки
+        // для default-методов интерфейсов платформы, и Plugin Verifier считает их переопределением
+        // устаревшего/экспериментального API (ToolWindowFactory.isApplicable, getAnchor и т. п.)
+        jvmDefault.set(org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode.NO_COMPATIBILITY)
+    }
 }
 
 dependencies {

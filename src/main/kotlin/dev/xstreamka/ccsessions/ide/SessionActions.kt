@@ -8,6 +8,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAwareAction
@@ -302,7 +303,7 @@ object SessionActions {
                 Files.writeString(target.file.toPath(), md)
                 val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target.file.toPath())
                 ApplicationManager.getApplication().invokeLater {
-                    if (vf != null && !project.isDisposed) FileEditorManager.getInstance(project).openFile(vf, true)
+                    if (vf != null && !project.isDisposed) OpenFileDescriptor(project, vf).navigate(true)
                 }
             }
         }
@@ -312,7 +313,7 @@ object SessionActions {
         override fun perform(project: Project, row: SessionRow) {
             val f = row.summary.file ?: return
             val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(f) ?: return
-            FileEditorManager.getInstance(project).openFile(vf, true)
+            OpenFileDescriptor(project, vf).navigate(true)
         }
     }
 

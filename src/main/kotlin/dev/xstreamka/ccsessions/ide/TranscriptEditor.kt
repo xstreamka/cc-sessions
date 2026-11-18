@@ -85,7 +85,7 @@ class TranscriptEditorProvider : FileEditorProvider, DumbAware {
             val s = svc.find(sessionId)
             val title = svc.meta[sessionId]?.alias ?: s?.title ?: sessionId.take(8)
             val file = files.compute(sessionId) { _, old -> if (old != null && old.isValid) old else TranscriptVirtualFile(sessionId, title) }!!
-            FileEditorManager.getInstance(project).openFile(file, true)
+            OpenFileDescriptor(project, file).navigate(true)
         }
 
         /** Закрыть вкладку транскрипта сессии, если она открыта (вызывать на EDT). */

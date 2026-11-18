@@ -7,6 +7,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.fileEditor.FileEditorManagerKeys
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.progress.ProcessCanceledException
@@ -87,7 +88,7 @@ class TerminalLauncher(private val project: Project) {
             val file = editorFiles[sessionId]
             val fem = FileEditorManager.getInstance(project)
             if (file != null && fem.isFileOpen(file)) {
-                fem.openFile(file, true)
+                OpenFileDescriptor(project, file).navigate(true)
                 return@invokeLater
             }
             val tw = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID) ?: return@invokeLater
@@ -189,7 +190,7 @@ class TerminalLauncher(private val project: Project) {
         return try {
             file.putUserData(FileEditorManagerKeys.CLOSING_TO_REOPEN, true)
             try {
-                FileEditorManager.getInstance(project).openFile(file, true)
+                OpenFileDescriptor(project, file).navigate(true)
             } finally {
                 file.putUserData(FileEditorManagerKeys.CLOSING_TO_REOPEN, null)
             }

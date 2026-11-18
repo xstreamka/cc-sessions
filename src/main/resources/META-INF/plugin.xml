@@ -33,6 +33,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <p><b>1.0.1</b></p>
+    <ul>
+      <li>Transcript viewer: only the file name is a link now, so clicking the rest of a tool row expands it; a notification is shown if the file is not found.</li>
+      <li>No more deprecated API usages.</li>
+    </ul>
     <p><b>1.0.0</b> — first public release.</p>
     <ul>
       <li>Sessions panel with day groups, favorites, tags, full-text search.</li>
