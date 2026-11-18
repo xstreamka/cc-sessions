@@ -1,0 +1,81 @@
+<idea-plugin>
+    <id>dev.xstreamka.ccsessions</id>
+    <name>CC Sessions</name>
+    <vendor url="https://github.com/xstreamka">XStreamka</vendor>
+
+    <description><![CDATA[
+    <p>Session manager for Claude Code CLI: browse, resume, archive and clean up your Claude Code sessions right in the IDE.</p>
+    <ul>
+      <li>Sessions panel for the current project (from <code>~/.claude/projects</code>), grouped by day: search including full text, favorites, tags, rename (the name works with <code>claude --resume &lt;name&gt;</code>).</li>
+      <li>Resume or fork a session in one click, in a built-in terminal tab next to your files, with your own Claude Code plugins, hooks and status line.</li>
+      <li>Live status of parallel sessions via an asynchronous hook: thinking, running a tool, waiting for permission, finished.</li>
+      <li>Transcript viewer: Markdown, collapsed tool calls, diffs of edits, file navigation, export to Markdown.</li>
+      <li>Archive and delete sessions; the archive is shared with JetBrains Air.</li>
+    </ul>
+    <p><b>What the plugin changes on disk</b> (only on your action, with confirmation where it matters):</p>
+    <ul>
+      <li>Enabling live status adds separate asynchronous hook entries to <code>~/.claude/settings.json</code> (a backup is made first; your own hooks are left untouched) and installs a small hook binary to <code>~/.claude/cc-sessions/bin</code>.</li>
+      <li>Archive and Rename append a title record to the session transcript, in the same format Claude Code <code>/rename</code> and JetBrains Air use.</li>
+      <li>Delete permanently removes the session transcript and its service files.</li>
+    </ul>
+    <p>Nothing is sent over the network. Requires Claude Code CLI. The plugin UI is in Russian.</p>
+    <p>Unofficial plugin, not affiliated with Anthropic.</p>
+    <hr/>
+    <p>Менеджер сессий Claude Code вокруг настоящего CLI.</p>
+    <ul>
+      <li>Панель сессий проекта из <code>~/.claude/projects</code> с группировкой по дням: поиск (в т. ч. по тексту), избранное, теги, переименование (имя работает в <code>claude --resume &lt;имя&gt;</code>).</li>
+      <li>Продолжить / ответвить сессию в один клик — во вкладке встроенного терминала рядом с файлами, с вашими плагинами, хуками и статуслайном.</li>
+      <li>Live-статус параллельных сессий через асинхронный хук: думает, выполняет инструмент, ждёт разрешения, закончила.</li>
+      <li>Просмотр транскрипта: Markdown, свёрнутые вызовы инструментов, diff правок, переход к файлам, экспорт в Markdown.</li>
+      <li>Архив и удаление сессий; архив общий с JetBrains Air.</li>
+    </ul>
+    <p>Неофициальный плагин, не связан с Anthropic.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <p><b>1.0.0</b> — first public release.</p>
+    <ul>
+      <li>Sessions panel with day groups, favorites, tags, full-text search.</li>
+      <li>Resume / fork in a terminal tab in the editor area; double-click resumes a session.</li>
+      <li>Live status via an asynchronous hook, notifications.</li>
+      <li>Transcript viewer with Markdown export.</li>
+      <li>Archive (shared with JetBrains Air), rename via <code>/rename</code> or the transcript, permanent delete.</li>
+    </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+    <depends>com.intellij.modules.jcef</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Claude Sessions"
+                    anchor="right"
+                    icon="/icons/ccSessions.svg"
+                    factoryClass="dev.xstreamka.ccsessions.ide.SessionsToolWindowFactory"/>
+
+        <fileEditorProvider implementation="dev.xstreamka.ccsessions.ide.TranscriptEditorProvider"/>
+
+        <postStartupActivity implementation="dev.xstreamka.ccsessions.ide.CcStartup"/>
+
+        <notificationGroup id="CC Sessions" displayType="BALLOON"/>
+
+        <applicationConfigurable parentId="tools"
+                                 instance="dev.xstreamka.ccsessions.ide.CcConfigurable"
+                                 id="dev.xstreamka.ccsessions.settings"
+                                 displayName="CC Sessions"/>
+    </extensions>
+
+    <actions>
+        <group id="CcSessions.ToolsMenu" text="Claude Sessions" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="CcSessions.NewSession"
+                    class="dev.xstreamka.ccsessions.ide.SessionActions$NewSession"
+                    text="Новая сессия Claude Code">
+                <keyboard-shortcut keymap="$default" first-keystroke="control alt shift C"/>
+            </action>
+            <action id="CcSessions.InstallHooks"
+                    class="dev.xstreamka.ccsessions.ide.SessionActions$InstallHooks"
+                    text="Live-статус…"/>
+        </group>
+    </actions>
+</idea-plugin>
