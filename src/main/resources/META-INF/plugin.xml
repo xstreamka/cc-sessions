@@ -33,6 +33,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <p><b>1.0.2</b></p>
+    <ul>
+      <li>The tool window and the Tools menu group are now called <b>CC Sessions</b>, same as the plugin.</li>
+    </ul>
     <p><b>1.0.1</b></p>
     <ul>
       <li>Transcript viewer: only the file name is a link now, so clicking the rest of a tool row expands it; a notification is shown if the file is not found.</li>
@@ -47,6 +51,8 @@
       <li>Archive (shared with JetBrains Air), rename via <code>/rename</code> or the transcript, permanent delete.</li>
     </ul>
     ]]></change-notes>
+
+    <resource-bundle>messages.CcSessionsBundle</resource-bundle>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
@@ -71,7 +77,7 @@
     </extensions>
 
     <actions>
-        <group id="CcSessions.ToolsMenu" text="Claude Sessions" popup="true">
+        <group id="CcSessions.ToolsMenu" text="CC Sessions" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <action id="CcSessions.NewSession"
                     class="dev.xstreamka.ccsessions.ide.SessionActions$NewSession"
