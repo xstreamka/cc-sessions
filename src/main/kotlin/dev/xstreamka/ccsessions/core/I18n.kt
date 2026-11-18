@@ -32,8 +32,19 @@ object I18n {
         return format(pattern, *args)
     }
 
-    /** MessageFormat для всех строк, в т. ч. без параметров: апостроф в значениях пишется как `''`. */
-    fun format(pattern: String, vararg args: Any?): String = MessageFormat(pattern, locale()).format(args)
+    /**
+     * Как BundleBase платформы (одно правило апострофа и для ключей, которые платформа читает из plugin.xml сама):
+     * без [args] — значение как есть (обычный `'`), с [args] — MessageFormat (апостроф `''`).
+     * Сломанный шаблон — вернуть его как есть, не падать.
+     */
+    fun format(pattern: String, vararg args: Any?): String {
+        if (args.isEmpty()) return pattern
+        return try {
+            MessageFormat(pattern, locale()).format(args)
+        } catch (_: IllegalArgumentException) {
+            pattern
+        }
+    }
 
     private fun bundle(locale: Locale): ResourceBundle =
         bundles.getOrPut(locale) { ResourceBundle.getBundle(BUNDLE, locale, I18n::class.java.classLoader, control) }

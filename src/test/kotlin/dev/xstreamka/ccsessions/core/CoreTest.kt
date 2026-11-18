@@ -485,23 +485,64 @@ class CoreTest {
     }
 
     @Test
+    fun i18nEnglishLocaleUsesBaseNotJvmDefault() {
+        val prevDefault = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(java.util.Locale.of("ru"))
+        try {
+            // Без no-fallback контрола для «en» (файла _en нет) взялся бы _ru по локали JVM
+            withLocale(java.util.Locale.ENGLISH) {
+                assertEquals("Plugin language:", I18n.msg("settings.language.label"))
+                assertEquals("Same as IDE", I18n.msg("settings.language.auto"))
+            }
+        } finally {
+            java.util.Locale.setDefault(prevDefault)
+        }
+    }
+
+    @Test
     fun i18nMessageFormat() {
-        assertEquals("3 of 5", I18n.format("{0} of {1}", 3, 5))
-        assertEquals("doesn't fit: x", I18n.format("doesn''t fit: {0}", "x"))
-        assertEquals("it's", I18n.format("it''s"))
+        withLocale(java.util.Locale.ROOT) {
+            assertEquals("3 of 5", I18n.format("{0} of {1}", 3, 5))
+            assertEquals("doesn't fit: x", I18n.format("doesn''t fit: {0}", "x"))
+            // без аргументов — как есть, MessageFormat не применяется
+            assertEquals("it's", I18n.format("it's"))
+            assertEquals("{0} it's", I18n.format("{0} it's"))
+            // сломанный шаблон — вернуть как есть
+            assertEquals("broken {0", I18n.format("broken {0", 1))
+            assertEquals("Plugin language:", I18n.msg("settings.language.label", "unused"))
+        }
     }
 
     @Test
     fun i18nBundlesHaveSameKeys() {
-        fun keys(name: String): Set<String> {
+        fun load(name: String): java.util.Properties {
             val stream = javaClass.getResourceAsStream("/messages/$name") ?: error("$name not found")
             val p = java.util.Properties()
             stream.reader(Charsets.UTF_8).use { p.load(it) }
-            return p.stringPropertyNames()
+            return p
         }
-        val base = keys("CcSessionsBundle.properties")
-        val ru = keys("CcSessionsBundle_ru.properties")
+        val baseProps = load("CcSessionsBundle.properties")
+        val ruProps = load("CcSessionsBundle_ru.properties")
+        val base = baseProps.stringPropertyNames()
+        val ru = ruProps.stringPropertyNames()
         assertTrue("toolwindow.stripe.Claude_Sessions" in base)
         assertEquals("only in base: ${base - ru}; only in _ru: ${ru - base}", base, ru)
+
+        val placeholder = Regex("""\{(\d+)""")
+        fun indexes(v: String) = placeholder.findAll(v).map { it.groupValues[1].toInt() }.toSet()
+        for (key in base) {
+            val b = baseProps.getProperty(key)
+            val r = ruProps.getProperty(key)
+            assertEquals("placeholders of $key", indexes(b), indexes(r))
+            listOf(b to java.util.Locale.ROOT, r to java.util.Locale.of("ru")).forEach { (v, loc) ->
+                if (indexes(v).isNotEmpty()) {
+                    try {
+                        java.text.MessageFormat(v, loc)
+                    } catch (e: IllegalArgumentException) {
+                        fail("$key ($loc) is not a valid MessageFormat: $v (${e.message})")
+                    }
+                }
+            }
+        }
     }
 }
