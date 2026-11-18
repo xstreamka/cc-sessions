@@ -761,4 +761,28 @@ class CoreTest {
             dir.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun openTabsListKeepsOrderWithoutDuplicates() {
+        val list = mutableListOf<String>()
+        assertTrue(OpenTabsList.add(list, "a"))
+        assertTrue(OpenTabsList.add(list, "b"))
+        assertFalse(OpenTabsList.add(list, "a")) // повторное открытие не дублирует и не двигает
+        assertFalse(OpenTabsList.add(list, " ")) // пустой id не учитываем
+        assertEquals(listOf("a", "b"), list)
+        assertTrue(OpenTabsList.remove(list, "a"))
+        assertFalse(OpenTabsList.remove(list, "zzz"))
+        assertEquals(listOf("b"), list)
+        // открыли снова — в конец, как новое открытие
+        assertTrue(OpenTabsList.add(list, "a"))
+        assertEquals(listOf("b", "a"), list)
+    }
+
+    @Test
+    fun openTabsListRemovesAllCopies() {
+        // в сохранённом вручную/старом состоянии могли оказаться дубли — удаление убирает все
+        val list = mutableListOf("a", "b", "a")
+        assertTrue(OpenTabsList.remove(list, "a"))
+        assertEquals(listOf("b"), list)
+    }
 }

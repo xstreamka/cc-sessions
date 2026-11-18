@@ -82,6 +82,20 @@
                                  displayName="CC Sessions"/>
     </extensions>
 
+    <applicationListeners>
+        <listener class="dev.xstreamka.ccsessions.ide.CcOpenTabsProjectCloseListener"
+                  topic="com.intellij.openapi.project.ProjectCloseListener"/>
+        <listener class="dev.xstreamka.ccsessions.ide.CcOpenTabsAppListener"
+                  topic="com.intellij.ide.AppLifecycleListener"/>
+    </applicationListeners>
+
+    <projectListeners>
+        <listener class="dev.xstreamka.ccsessions.ide.CcOpenTabsEditorListener"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+        <listener class="dev.xstreamka.ccsessions.ide.CcOpenTabsToolWindowListener"
+                  topic="com.intellij.openapi.wm.ex.ToolWindowManagerListener"/>
+    </projectListeners>
+
     <actions>
         <group id="CcSessions.ToolsMenu" popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
