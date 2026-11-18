@@ -154,12 +154,15 @@ class TerminalLauncher(private val project: Project) {
                     tabs[sessionId] = tab
                     if (file != null) editorFiles[sessionId] = file
                     // Запоминаем для восстановления после перезапуска IDE
-                    CcOpenTabs.get(project).sessionOpened(sessionId)
+                    CcOpenTabs.getIfAlive(project)?.sessionOpened(sessionId)
                     tab.view.coroutineScope.coroutineContext.job.invokeOnCompletion {
                         tabs.remove(sessionId, tab)
                         if (file != null) editorFiles.remove(sessionId, file)
-                        // Вкладку закрыли, пока проект открыт, — больше не восстанавливаем; при закрытии проекта/IDE запись остаётся
-                        CcOpenTabs.ifOpen(project)?.sessionClosed(sessionId)
+                        // Вкладку закрыли, пока проект открыт, — больше не восстанавливаем; при закрытии проекта/IDE запись остаётся.
+                        // Есть другая живая вкладка той же сессии (или её успели открыть снова) — запись тоже остаётся.
+                        if (tabs[sessionId] == null) {
+                            CcOpenTabs.ifCreated(project)?.sessionClosed(sessionId) { hasOpenTab(sessionId) }
+                        }
                     }
                 }
                 if (file == null) ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID)?.activate(null)

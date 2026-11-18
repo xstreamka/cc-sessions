@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -764,25 +765,36 @@ class CoreTest {
 
     @Test
     fun openTabsListKeepsOrderWithoutDuplicates() {
-        val list = mutableListOf<String>()
-        assertTrue(OpenTabsList.add(list, "a"))
-        assertTrue(OpenTabsList.add(list, "b"))
-        assertFalse(OpenTabsList.add(list, "a")) // повторное открытие не дублирует и не двигает
-        assertFalse(OpenTabsList.add(list, " ")) // пустой id не учитываем
+        var list = emptyList<String>()
+        list = OpenTabsList.added(list, "a")
+        list = OpenTabsList.added(list, "b")
+        val before = list
+        assertSame(before, OpenTabsList.added(list, "a")) // повторное открытие не дублирует и не двигает
+        assertSame(before, OpenTabsList.added(list, " ")) // пустой id не учитываем
         assertEquals(listOf("a", "b"), list)
-        assertTrue(OpenTabsList.remove(list, "a"))
-        assertFalse(OpenTabsList.remove(list, "zzz"))
+        list = OpenTabsList.removed(list, "a")
+        assertSame(list, OpenTabsList.removed(list, "zzz"))
         assertEquals(listOf("b"), list)
         // открыли снова — в конец, как новое открытие
-        assertTrue(OpenTabsList.add(list, "a"))
+        list = OpenTabsList.added(list, "a")
         assertEquals(listOf("b", "a"), list)
     }
 
     @Test
-    fun openTabsListRemovesAllCopies() {
-        // в сохранённом вручную/старом состоянии могли оказаться дубли — удаление убирает все
-        val list = mutableListOf("a", "b", "a")
-        assertTrue(OpenTabsList.remove(list, "a"))
-        assertEquals(listOf("b"), list)
+    fun openTabsListDoesNotMutateInput() {
+        // текущий список может в этот момент сериализоваться платформой в фоне — его не трогаем, возвращаем новый
+        val src = mutableListOf("a")
+        val res = OpenTabsList.added(src, "b")
+        assertEquals(listOf("a"), src)
+        assertEquals(listOf("a", "b"), res)
+        assertEquals(listOf("a"), OpenTabsList.removed(res, "b"))
+        assertEquals(listOf("a", "b"), res)
+    }
+
+    @Test
+    fun openTabsListNormalizesLoadedState() {
+        // в сохранённом вручную/старом состоянии могли оказаться дубли и пустые id
+        assertEquals(listOf("a", "b"), OpenTabsList.normalized(listOf("a", "", "b", "a", " ")))
+        assertEquals(listOf("b"), OpenTabsList.removed(listOf("a", "b", "a"), "a"))
     }
 }
