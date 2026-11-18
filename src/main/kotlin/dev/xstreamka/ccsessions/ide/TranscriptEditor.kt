@@ -73,7 +73,10 @@ class TranscriptVirtualFile(val sessionId: String, title: String) :
 class TranscriptEditorProvider : FileEditorProvider, DumbAware {
     override fun accept(project: Project, file: VirtualFile) = file is TranscriptVirtualFile
     override fun acceptRequiresReadAction() = false
-    override fun createEditor(project: Project, file: VirtualFile): FileEditor = TranscriptEditor(project, file as TranscriptVirtualFile)
+    override fun createEditor(project: Project, file: VirtualFile): FileEditor {
+        CcLanguage.install()
+        return TranscriptEditor(project, file as TranscriptVirtualFile)
+    }
     override fun getEditorTypeId() = "cc-sessions-transcript"
     override fun getPolicy() = FileEditorPolicy.HIDE_DEFAULT_EDITOR
 
@@ -169,6 +172,7 @@ class TranscriptEditor(
         ApplicationManager.getApplication().messageBus.connect(this).apply {
             subscribe(LiveStatusListener.TOPIC, LiveStatusListener { states, _ -> if (states.containsKey(sessionId)) updateHeader() })
             subscribe(LafManagerListener.TOPIC, LafManagerListener { reload(full = true) })
+            subscribe(CcLanguageListener.TOPIC, CcLanguageListener { reload(full = true) })
         }
         reload(full = true)
     }

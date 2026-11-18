@@ -436,4 +436,72 @@ class CoreTest {
         assertEquals(listOf("e1", "e2"), r[2].second.map { it.first })
         assertTrue(SessionGroups.group(emptyList<String>()) { DayGroup.TODAY }.isEmpty())
     }
+
+    // ---------- I18n ----------
+
+    private fun <T> withLocale(locale: java.util.Locale, block: () -> T): T {
+        val prev = I18n.localeProvider
+        I18n.localeProvider = { locale }
+        try {
+            return block()
+        } finally {
+            I18n.localeProvider = prev
+        }
+    }
+
+    @Test
+    fun i18nRootIsEnglishEvenOnRussianJvm() {
+        val prevDefault = java.util.Locale.getDefault()
+        java.util.Locale.setDefault(java.util.Locale.of("ru"))
+        try {
+            withLocale(java.util.Locale.ROOT) {
+                assertEquals(java.util.Locale.ROOT, I18n.locale())
+                assertEquals("Plugin language:", I18n.msg("settings.language.label"))
+                assertEquals("Same as IDE", I18n.msg("settings.language.auto"))
+            }
+        } finally {
+            java.util.Locale.setDefault(prevDefault)
+        }
+    }
+
+    @Test
+    fun i18nRussian() {
+        withLocale(java.util.Locale.of("ru")) {
+            assertEquals("Язык плагина:", I18n.msg("settings.language.label"))
+            assertEquals("Как в IDE", I18n.msg("settings.language.auto"))
+            assertEquals("English", I18n.msg("settings.language.en"))
+            assertEquals("Русский", I18n.msg("settings.language.ru"))
+        }
+        withLocale(java.util.Locale.ROOT) {
+            assertEquals("English", I18n.msg("settings.language.en"))
+            assertEquals("Русский", I18n.msg("settings.language.ru"))
+        }
+    }
+
+    @Test
+    fun i18nUnknownKeyReturnsKey() {
+        withLocale(java.util.Locale.ROOT) { assertEquals("no.such.key", I18n.msg("no.such.key", 1)) }
+        withLocale(java.util.Locale.of("ru")) { assertEquals("no.such.key", I18n.msg("no.such.key")) }
+    }
+
+    @Test
+    fun i18nMessageFormat() {
+        assertEquals("3 of 5", I18n.format("{0} of {1}", 3, 5))
+        assertEquals("doesn't fit: x", I18n.format("doesn''t fit: {0}", "x"))
+        assertEquals("it's", I18n.format("it''s"))
+    }
+
+    @Test
+    fun i18nBundlesHaveSameKeys() {
+        fun keys(name: String): Set<String> {
+            val stream = javaClass.getResourceAsStream("/messages/$name") ?: error("$name not found")
+            val p = java.util.Properties()
+            stream.reader(Charsets.UTF_8).use { p.load(it) }
+            return p.stringPropertyNames()
+        }
+        val base = keys("CcSessionsBundle.properties")
+        val ru = keys("CcSessionsBundle_ru.properties")
+        assertTrue("toolwindow.stripe.Claude_Sessions" in base)
+        assertEquals("only in base: ${base - ru}; only in _ru: ${ru - base}", base, ru)
+    }
 }

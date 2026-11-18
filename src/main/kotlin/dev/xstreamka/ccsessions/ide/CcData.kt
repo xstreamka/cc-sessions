@@ -12,6 +12,10 @@ import dev.xstreamka.ccsessions.core.SessionSummary
 
 /** Общие объекты плагина. */
 object CcData {
+    init {
+        CcLanguage.install() // локаль плагина — раньше любого текста
+    }
+
     val paths: ClaudePaths by lazy { ClaudePaths.detect() }
     val meta: MetaStore by lazy { MetaStore(paths.metaFile) }
 

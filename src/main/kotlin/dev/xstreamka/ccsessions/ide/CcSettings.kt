@@ -33,6 +33,8 @@ class CcSettings : SimplePersistentStateComponent<CcSettings.S>(S()) {
         var hooksPromptShown by property(false)
         /** Куда класть бэкапы settings.json при установке/удалении хуков; пусто — рядом с settings.json. */
         var settingsBackupDir by string("")
+        /** Язык интерфейса плагина: `auto` (как в IDE) | `en` | `ru`, см. [CcLanguage]. */
+        var uiLanguage by string(CcLanguage.AUTO)
     }
 
     companion object {

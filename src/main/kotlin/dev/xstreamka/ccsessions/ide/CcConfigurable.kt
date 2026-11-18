@@ -4,16 +4,25 @@ import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.COLUMNS_LARGE
+import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 
 class CcConfigurable : BoundConfigurable("CC Sessions") {
 
     override fun createPanel(): DialogPanel {
+        CcLanguage.install()
         val s = CcSettings.get()
         return panel {
+            row(CcBundle.message("settings.language.label")) {
+                val languages = listOf(CcLanguage.AUTO, CcLanguage.EN, CcLanguage.RU)
+                comboBox(languages, textListCellRenderer { lang -> lang?.let { CcBundle.message("settings.language.$it") } })
+                    .bindItem({ s.uiLanguage?.takeIf { it in languages } ?: CcLanguage.AUTO }, { s.uiLanguage = it ?: CcLanguage.AUTO })
+                    .comment(CcBundle.message("settings.language.comment"))
+            }
             group("Запуск Claude Code") {
                 row("Команда:") {
                     textField()
@@ -65,7 +74,9 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
     }
 
     override fun apply() {
+        val localeBefore = CcLanguage.locale()
         super.apply()
+        if (CcLanguage.locale() != localeBefore) CcLanguage.fireChanged()
         ProjectManager.getInstance().openProjects.forEach { SessionsService.get(it).requestRefresh() }
     }
 

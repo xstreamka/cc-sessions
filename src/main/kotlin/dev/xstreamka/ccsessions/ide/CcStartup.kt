@@ -15,6 +15,7 @@ import java.nio.file.Paths
 
 class CcStartup : ProjectActivity {
     override suspend fun execute(project: Project) {
+        CcLanguage.install()
         SessionsService.get(project).ensureStarted()
         LiveStatusService.get().ensureStarted()
         LiveNotifier.ensureSubscribed()
