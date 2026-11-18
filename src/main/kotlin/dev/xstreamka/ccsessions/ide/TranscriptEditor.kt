@@ -119,6 +119,7 @@ class TranscriptEditor(
     private val fallback = JBTextArea().apply { isEditable = false; lineWrap = true; wrapStyleWord = true }
     private val loading = AtomicBoolean(false)
     private val pending = AtomicBoolean(false)
+    private val pendingFull = AtomicBoolean(false)
     @Volatile private var loaded = false
     @Volatile private var lastTranscript: Transcript? = null
     private var lastSize = -1L
@@ -186,6 +187,7 @@ class TranscriptEditor(
 
     private fun reload(full: Boolean) {
         if (!loading.compareAndSet(false, true)) {
+            if (full) pendingFull.set(true)
             pending.set(true) // догоним после текущей загрузки
             return
         }
@@ -218,7 +220,7 @@ class TranscriptEditor(
                 thisLogger().warn("cannot render transcript $sessionId", e)
             } finally {
                 loading.set(false)
-                if (pending.getAndSet(false) && !project.isDisposed) reload(full = false)
+                if (pending.getAndSet(false) && !project.isDisposed) reload(full = pendingFull.getAndSet(false))
             }
         }
     }

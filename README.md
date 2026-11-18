@@ -64,7 +64,7 @@
   `/home/<you>/.npm-global/bin/claude`. Вкладки запускают ваш обычный shell, поэтому чаще всего хватает `claude`.
 - **Аргументы resume/fork.** Claude Code **не восстанавливает `bypassPermissions` при resume**. Если он нужен —
   `--permission-mode bypassPermissions` здесь или `permissions.defaultMode` в `settings.json`.
-- **Язык плагина.** «Как в IDE» (по умолчанию), English или Русский. Названия пунктов меню Tools и действий в Keymap следуют языку IDE.
+- **Язык плагина.** «Как в IDE» (по умолчанию), English или Русский. Языку IDE следуют только название группы в меню Tools и названия действий в Keymap.
 - Уведомления: о завершении хода, о запросе разрешения, «только когда IDE не в фокусе».
 
 ## Как это устроено
