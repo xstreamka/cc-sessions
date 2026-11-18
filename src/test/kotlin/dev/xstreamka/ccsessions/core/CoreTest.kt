@@ -797,4 +797,56 @@ class CoreTest {
         assertEquals(listOf("a", "b"), OpenTabsList.normalized(listOf("a", "", "b", "a", " ")))
         assertEquals(listOf("b"), OpenTabsList.removed(listOf("a", "b", "a"), "a"))
     }
+
+    @Test
+    fun restorePlanForSessionsSkipsMissingArchivedAndActive() {
+        val ids = listOf("ok1", "gone", "arch", "busy", "ok2")
+        val plan = TabsRestore.sessions(
+            ids,
+            exists = { it != "gone" },
+            archived = { it == "arch" },
+            active = { it == "busy" },
+        )
+        // порядок открытия сохраняется — вкладки вернутся в том же порядке
+        assertEquals(listOf("ok1", "ok2"), plan.restore)
+        assertEquals(listOf("gone", "arch", "busy"), plan.drop)
+    }
+
+    @Test
+    fun restorePlanChecksExistenceFirst() {
+        // для удалённой сессии сводки нет — архив/live-статус по ней не спрашиваем
+        val asked = mutableListOf<String>()
+        val plan = TabsRestore.sessions(
+            listOf("gone"),
+            exists = { false },
+            archived = { asked += "archived:$it"; false },
+            active = { asked += "active:$it"; false },
+        )
+        assertEquals(emptyList<String>(), plan.restore)
+        assertEquals(listOf("gone"), plan.drop)
+        assertEquals(emptyList<String>(), asked)
+    }
+
+    @Test
+    fun restorePlanIgnoresDuplicatesAndBlank() {
+        val plan = TabsRestore.sessions(listOf("a", "", "a", " ", "b"), { true }, { false }, { false })
+        assertEquals(listOf("a", "b"), plan.restore)
+        assertEquals(emptyList<String>(), plan.drop)
+    }
+
+    @Test
+    fun restorePlanForTranscriptsOnlyByFile() {
+        // транскрипт архивной или работающей сессии открыть можно — проверяется только файл
+        val plan = TabsRestore.transcripts(listOf("t1", "gone", "t2"), exists = { it != "gone" })
+        assertEquals(listOf("t1", "t2"), plan.restore)
+        assertEquals(listOf("gone"), plan.drop)
+    }
+
+    @Test
+    fun openTabsListRemovedAll() {
+        val list = listOf("a", "b", "c")
+        assertEquals(listOf("b"), OpenTabsList.removedAll(list, listOf("a", "c", "zzz")))
+        assertSame(list, OpenTabsList.removedAll(list, listOf("zzz")))
+        assertSame(list, OpenTabsList.removedAll(list, emptyList()))
+    }
 }

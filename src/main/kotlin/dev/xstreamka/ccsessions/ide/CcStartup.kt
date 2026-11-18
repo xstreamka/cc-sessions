@@ -4,6 +4,8 @@ import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.ControlFlowException
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.startup.ProjectActivity
@@ -12,6 +14,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 import dev.xstreamka.ccsessions.core.LiveStatus
 import dev.xstreamka.ccsessions.core.LiveTransition
 import java.nio.file.Paths
+import java.util.concurrent.CancellationException
 
 class CcStartup : ProjectActivity {
     override suspend fun execute(project: Project) {
@@ -19,6 +22,13 @@ class CcStartup : ProjectActivity {
         SessionsService.get(project).ensureStarted()
         LiveStatusService.get().ensureStarted()
         LiveNotifier.ensureSubscribed()
+        // Вернуть панель и вкладки прошлого запуска: проверки в фоне, вкладки — на EDT, открытие проекта не ждёт
+        try {
+            CcRestore.start(project)
+        } catch (e: Exception) {
+            if (e is ControlFlowException || e is CancellationException) throw e
+            thisLogger().warn("cannot restore open tabs", e)
+        }
         if (HookInstaller.isInstalled()) {
             runCatching { HookInstaller.syncBinary() } // обновляем бинарник после апдейта плагина
         } else {

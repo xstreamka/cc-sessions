@@ -11,6 +11,7 @@ import dev.xstreamka.ccsessions.core.SessionIndex
 import dev.xstreamka.ccsessions.core.SessionMeta
 import dev.xstreamka.ccsessions.core.SessionSummary
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,6 +27,8 @@ class SessionsService(private val project: Project) : Disposable {
     // принудительное обновление, запрошенное во время идущего скана, не теряется
     private val pendingForce = AtomicBoolean(false)
     private var future: ScheduledFuture<*>? = null
+    /** Первый скан закончился (успешно или нет) — после него [sessions] и [meta] заполнены. */
+    private val firstScan = CountDownLatch(1)
     @Volatile var sessions: List<SessionSummary> = emptyList()
         private set
     @Volatile var meta: Map<String, SessionMeta> = emptyMap()
@@ -61,6 +64,9 @@ class SessionsService(private val project: Project) : Disposable {
     }
 
     fun find(id: String): SessionSummary? = sessions.firstOrNull { it.id == id }
+
+    /** Ждать окончания первого скана (не на EDT). false — не дождались за [timeoutMs]. */
+    fun awaitFirstScan(timeoutMs: Long): Boolean = firstScan.await(timeoutMs, TimeUnit.MILLISECONDS)
 
     fun updateMeta(id: String, f: (SessionMeta) -> SessionMeta) {
         AppExecutorUtil.getAppExecutorService().execute {
@@ -108,6 +114,7 @@ class SessionsService(private val project: Project) : Disposable {
             thisLogger().debug("scan failed", e)
         } finally {
             scanning.set(false)
+            firstScan.countDown()
             rerunPendingForce()
         }
     }

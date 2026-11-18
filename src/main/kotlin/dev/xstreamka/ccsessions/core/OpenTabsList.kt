@@ -14,6 +14,10 @@ object OpenTabsList {
     fun removed(list: List<String>, id: String): List<String> =
         if (id !in list) list else list.filter { it != id }
 
+    /** [list] без всех [ids] (тот же объект, если ни одного нет). */
+    fun removedAll(list: List<String>, ids: Collection<String>): List<String> =
+        if (list.none { it in ids }) list else list.filter { it !in ids }
+
     /** Привести загруженный список к виду «без пустых и дублей», порядок первых вхождений сохраняется. */
     fun normalized(list: List<String>): List<String> = list.filter { it.isNotBlank() }.distinct()
 }

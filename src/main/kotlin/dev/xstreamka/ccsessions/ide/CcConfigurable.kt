@@ -41,6 +41,10 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
                     checkBox(CcBundle.message("settings.openInEditor")).bindSelected(s::openInEditor)
                         .comment(CcBundle.message("settings.openInEditor.comment"))
                 }
+                row {
+                    checkBox(CcBundle.message("settings.restoreOnStartup")).bindSelected(s::restoreOnStartup)
+                        .comment(CcBundle.message("settings.restoreOnStartup.comment"))
+                }
             }
             group(CcBundle.message("settings.group.list")) {
                 row { checkBox(CcBundle.message("settings.hideSdk")).bindSelected(s::hideSdkSessions) }

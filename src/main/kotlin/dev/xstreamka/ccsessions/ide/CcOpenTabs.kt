@@ -12,13 +12,13 @@ import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerKeys
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
-import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import dev.xstreamka.ccsessions.core.OpenTabsList
+import java.util.concurrent.CancellationException
 
 /**
  * Что было открыто плагином в проекте: вкладки сессий (claude), вкладки транскриптов и панель CC Sessions.
@@ -125,6 +125,24 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
         closing = true
     }
 
+    /**
+     * Убрать из списков то, что при восстановлении пропущено (транскрипта нет, сессия в архиве или уже работает).
+     * Как и остальные удаления — отложенно и не во время закрытия проекта; [sessionOpen]/[transcriptOpen]
+     * перепроверяются на EDT: если вкладку за это время открыли, запись остаётся.
+     */
+    fun forget(
+        sessionIds: Collection<String>,
+        transcriptIds: Collection<String>,
+        sessionOpen: (String) -> Boolean,
+        transcriptOpen: (String) -> Boolean,
+    ) {
+        if (sessionIds.isEmpty() && transcriptIds.isEmpty()) return
+        removeLater {
+            sessions = OpenTabsList.removedAll(sessions, sessionIds.filterNot(sessionOpen))
+            transcripts = OpenTabsList.removedAll(transcripts, transcriptIds.filterNot(transcriptOpen))
+        }
+    }
+
     /** Списки для чтения (восстановление при старте). */
     fun sessions(): List<String> = sessions
     fun transcripts(): List<String> = transcripts
@@ -161,8 +179,9 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
             if (project.isDisposed) return null
             return try {
                 get()
-            } catch (e: ProcessCanceledException) {
-                // AlreadyDisposedException (это PCE) — проект успели закрыть между проверкой и обращением к сервису
+            } catch (e: CancellationException) {
+                // AlreadyDisposedException (это PCE, а PCE — CancellationException) или отмена корутины — проект успели
+                // закрыть между проверкой и обращением к сервису
                 if (project.isDisposed) null else throw e
             }
         }

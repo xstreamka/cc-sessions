@@ -20,6 +20,8 @@ class CcSettings : SimplePersistentStateComponent<CcSettings.S>(S()) {
         var resumeArgs by string("")
         /** Открывать терминал сессии вкладкой в редакторе (рядом с файлами), а не в окне Terminal. */
         var openInEditor by property(true)
+        /** При открытии проекта вернуть вкладки сессий (снова `claude --resume`), транскрипты и панель, см. [CcRestore]. */
+        var restoreOnStartup by property(true)
         var notifyOnIdle by property(true)
         var notifyOnPermission by property(true)
         var notifyOnlyWhenInactive by property(true)
