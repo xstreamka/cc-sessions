@@ -35,7 +35,7 @@
     <change-notes><![CDATA[
     <p><b>1.0.2</b></p>
     <ul>
-      <li>The tool window and the Tools menu group are now called <b>CC Sessions</b>, same as the plugin.</li>
+      <li>The tool window and the Tools menu group are now called <b>CC Sessions</b>, same as the plugin; the window header says it is about Claude Code sessions.</li>
     </ul>
     <p><b>1.0.1</b></p>
     <ul>

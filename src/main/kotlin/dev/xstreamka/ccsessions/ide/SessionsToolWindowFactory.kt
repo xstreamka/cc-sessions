@@ -10,7 +10,8 @@ import com.intellij.ui.content.ContentFactory
 class SessionsToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val panel = SessionsPanel(project, toolWindow)
-        val content = ContentFactory.getInstance().createContent(panel, "", false)
+        // Имя вкладки выводится в заголовке рядом с названием окна: «CC Sessions · сессии Claude Code»
+        val content = ContentFactory.getInstance().createContent(panel, "сессии Claude Code", false)
         Disposer.register(content, panel)
         toolWindow.contentManager.addContent(content)
         LiveStatusService.get().ensureStarted()
