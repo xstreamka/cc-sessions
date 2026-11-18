@@ -272,8 +272,9 @@ class TranscriptHtml(
         if (path.isBlank()) return ""
         val name = path.substringAfterLast('/').substringAfterLast('\\')
         val dir = path.removeSuffix(name)
-        return "<span class=\"file\" data-file=\"${esc(path)}\"" + (line?.let { " data-line=\"$it\"" } ?: "") +
-            "><b>${esc(name)}</b><span class=\"dir\">${esc(dir)}</span></span>"
+        // Ссылка — только имя файла: клик по пути к папке и остальной строке раскрывает блок инструмента
+        return "<span class=\"file\"><b data-file=\"${esc(path)}\"" + (line?.let { " data-line=\"$it\"" } ?: "") +
+            ">${esc(name)}</b><span class=\"dir\">${esc(dir)}</span></span>"
     }
 
     private fun time(ts: Instant?) = if (ts == null) "" else "<time>${timeFmt.format(ts.atZone(zone))}</time>"

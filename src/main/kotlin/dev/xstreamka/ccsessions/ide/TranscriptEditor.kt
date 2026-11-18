@@ -22,6 +22,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.util.text.StringUtil
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.ui.JBColor
@@ -264,7 +266,11 @@ class TranscriptEditor(
                 else -> return
             }.normalize()
             ApplicationManager.getApplication().invokeLater {
-                val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path) ?: return@invokeLater
+                val vf = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)
+                if (vf == null) {
+                    CcData.notify(project, "Файл не найден", StringUtil.escapeXmlEntities(path.toString()), NotificationType.WARNING)
+                    return@invokeLater
+                }
                 OpenFileDescriptor(project, vf, ((line ?: 1) - 1).coerceAtLeast(0), 0).navigate(true)
             }
         } catch (e: Exception) {

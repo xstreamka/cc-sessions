@@ -369,6 +369,8 @@ class CoreTest {
         val html = TranscriptHtml().document(t, TranscriptHtml.Options(dark = true, alias = "Мой алиас", live = "думает"))
         assertTrue(html.contains("<h1>Мой алиас</h1>"))
         assertTrue(html.contains("data-file=\"/home/u/proj/src/Order.php\""))
+        // ссылка только на имени файла: клик по пути к папке и остальной строке раскрывает блок
+        assertTrue(html.contains("<b data-file=\"/home/u/proj/src/Order.php\">Order.php</b><span class=\"dir\">/home/u/proj/src/</span>"))
         assertTrue(html.contains("data-file=\"src/Order.php\" data-line=\"42\""))
         assertTrue(html.contains("class=\"add\">+ B"))
         assertTrue(html.contains("задачи 1/2"))

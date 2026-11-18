@@ -116,10 +116,10 @@ pre.diff .add { background: var(--add-bg); color: var(--add-fg); }
 pre.diff .del { background: var(--del-bg); color: var(--del-fg); }
 pre.diff .skip { color: var(--dim); font-style: italic; background: var(--bg3); }
 
-.file { cursor: pointer; }
 .file b { font-weight: 600; }
+.file b[data-file] { cursor: pointer; }
 .file .dir { color: var(--dim); margin-left: 6px; font-size: 11.5px; }
-.file:hover b, code.file:hover { color: var(--link); text-decoration: underline; }
+.file b[data-file]:hover, code.file:hover { color: var(--link); text-decoration: underline; }
 code.file { cursor: pointer; }
 
 .todos { list-style: none; padding: 4px 0 0 2px; margin: 0; }
