@@ -11,10 +11,15 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.openapi.wm.ex.ToolWindowManagerListener
 import com.intellij.ui.CollectionListModel
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.DoubleClickListener
@@ -23,6 +28,9 @@ import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SearchTextField
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBList
+import com.intellij.ui.content.ContentManager
+import com.intellij.ui.content.ContentManagerEvent
+import com.intellij.ui.content.ContentManagerListener
 import com.intellij.util.Alarm
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.ui.JBUI
@@ -40,6 +48,8 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Collections
+import java.util.WeakHashMap
 import javax.swing.JPanel
 import javax.swing.KeyStroke
 import javax.swing.ListSelectionModel
@@ -56,12 +66,21 @@ class SessionsPanel(
     private val service = SessionsService.get(project)
     private val model = CollectionListModel<SessionListItem>()
     private val list = SessionsList()
-    private val renderer = SessionListRenderer({ CcSettings.get().showAllProjects }, { list.hoverIndex }, { list.hoverOnButton }, { list.hoverRow })
+    private val renderer = SessionListRenderer(
+        { CcSettings.get().showAllProjects }, { list.hoverIndex }, { list.hoverOnButton }, { list.hoverRow }, { shownTabs },
+    )
     private val search = SearchTextField(false)
     private val alarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
     @Volatile private var contentMatches: Set<String> = emptySet()
     private var contentQuery = ""
     private var live: Map<String, LiveState> = LiveStatusService.get().all()
+    /** Сессии, чьи вкладки сейчас на виду (см. [TerminalLauncher.shownSessionIds]): их строки подсвечиваются. */
+    private var shownTabs: Set<String> = emptySet()
+    private var disposed = false
+    private val watchedContentManagers: MutableSet<ContentManager> = Collections.newSetFromMap(WeakHashMap())
+    private val tabSelectionListener = object : ContentManagerListener {
+        override fun selectionChanged(event: ContentManagerEvent) = scheduleShownTabsUpdate()
+    }
 
     /** Обёртка, через которую действия получают выбранную сессию. */
     private val body = object : JPanel(BorderLayout()), UiDataProvider {
@@ -168,9 +187,40 @@ class SessionsPanel(
                 live = states
                 rebuild()
             })
+        // Переключение вкладок сессий: в редакторе, в окне Terminal (вкладки внутри него — см. updateShownTabs), его показ/скрытие
+        conn.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun selectionChanged(event: FileEditorManagerEvent) = scheduleShownTabsUpdate()
+        })
+        conn.subscribe(ToolWindowManagerListener.TOPIC, object : ToolWindowManagerListener {
+            override fun stateChanged(toolWindowManager: ToolWindowManager) = scheduleShownTabsUpdate()
+        })
+        conn.subscribe(SessionTabsListener.TOPIC, SessionTabsListener { scheduleShownTabsUpdate() })
 
         service.ensureStarted()
         rebuild()
+        updateShownTabs()
+    }
+
+    /** После события: состояние вкладок к этому моменту может быть ещё не обновлено (и событие может прийти не с EDT). */
+    private fun scheduleShownTabsUpdate() {
+        ApplicationManager.getApplication().invokeLater(::updateShownTabs, { project.isDisposed || disposed })
+    }
+
+    private fun updateShownTabs() {
+        val launcher = TerminalLauncher.get(project)
+        // Переключение вкладок внутри окна Terminal — событие его менеджера содержимого; подписываемся на каждый один раз
+        for (cm in launcher.tabContentManagers()) {
+            if (cm.isDisposed || !watchedContentManagers.add(cm)) continue
+            cm.addContentManagerListener(tabSelectionListener)
+            Disposer.register(this) { if (!cm.isDisposed) cm.removeContentManagerListener(tabSelectionListener) }
+        }
+        val now = launcher.shownSessionIds()
+        if (now != shownTabs) {
+            // Переключились на вкладку сессии — ручное выделение снимаем, иначе в списке выделены сразу две строки
+            if ((now - shownTabs).isNotEmpty()) list.clearSelection()
+            shownTabs = now
+            list.repaint()
+        }
     }
 
     private fun query() = search.text.trim()
@@ -415,5 +465,7 @@ class SessionsPanel(
         toolWindow.setIcon(if (anyActive) ExecutionUtil.getLiveIndicator(CcIcons.ToolWindow) else CcIcons.ToolWindow)
     }
 
-    override fun dispose() {}
+    override fun dispose() {
+        disposed = true
+    }
 }

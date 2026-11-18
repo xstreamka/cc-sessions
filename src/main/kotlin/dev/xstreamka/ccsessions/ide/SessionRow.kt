@@ -59,12 +59,14 @@ sealed interface SessionListItem {
  * Рендерер списка панели: заголовки групп рисует сам, сессии отдаёт [SessionCellRenderer].
  * [hoveredIndex] — индекс строки-сессии под мышью (-1 — нет): у неё справа рисуется кнопка «Завершить».
  * [hoveredRow] — индекс любой строки под мышью (и заголовка группы): она подсвечивается.
+ * [shownIds] — сессии, чьи вкладки сейчас на виду: их строки подсвечиваются так же, как под мышью, и с кнопкой «Завершить».
  */
 class SessionListRenderer(
     showProject: () -> Boolean,
     private val hoveredIndex: () -> Int = { -1 },
     private val buttonHovered: () -> Boolean = { false },
     private val hoveredRow: () -> Int = { -1 },
+    private val shownIds: () -> Set<String> = { emptySet() },
 ) : ListCellRenderer<SessionListItem> {
     private val session = SessionCellRenderer(showProject)
     private val header = GroupHeaderRenderer()
@@ -75,7 +77,8 @@ class SessionListRenderer(
         is SessionListItem.Header -> header.render(value, selected, focused, index >= 0 && index == hoveredRow())
         is SessionListItem.Session -> {
             val hovered = index >= 0 && index == hoveredIndex()
-            session.render(value.row, selected, focused, hovered, list, hovered && buttonHovered())
+            val highlighted = hovered || value.row.id in shownIds()
+            session.render(value.row, selected, focused, highlighted, list, hovered && buttonHovered())
         }
     }
 

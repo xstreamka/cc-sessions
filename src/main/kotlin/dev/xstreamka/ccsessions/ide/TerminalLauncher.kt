@@ -18,7 +18,9 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTab
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabBuilder
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
+import com.intellij.ui.content.ContentManager
 import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.util.messages.Topic
 import dev.xstreamka.ccsessions.core.Shell
 import dev.xstreamka.ccsessions.core.SessionSummary
 import kotlinx.coroutines.isActive
@@ -43,6 +45,44 @@ class TerminalLauncher(private val project: Project) {
     private val editorFiles = ConcurrentHashMap<String, VirtualFile>()
 
     fun hasOpenTab(sessionId: String): Boolean = tabs[sessionId]?.let(::isAlive) == true
+
+    /**
+     * Сессии, чьи вкладки сейчас на виду: выбранные в редакторе (во всех его частях) и выбранные в видимом окне Terminal.
+     * Только для вкладок, открытых плагином. Вызывать на EDT.
+     */
+    fun shownSessionIds(): Set<String> {
+        if (tabs.isEmpty()) return emptySet()
+        val fem = FileEditorManager.getInstance(project)
+        val selectedFiles = fem.selectedFiles.toSet()
+        val terminalVisible = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID)?.isVisible == true
+        val result = HashSet<String>()
+        for ((id, tab) in tabs) {
+            if (!isAlive(tab)) continue
+            val file = editorFiles[id]
+            if (file != null && fem.isFileOpen(file)) {
+                if (file in selectedFiles) result += id
+                continue
+            }
+            // Вкладка в окне Terminal (в т.ч. если её вернули туда из редактора)
+            val shown = try {
+                val content = tab.content
+                terminalVisible && content.manager?.isSelected(content) == true
+            } catch (_: Throwable) {
+                false
+            }
+            if (shown) result += id
+        }
+        return result
+    }
+
+    /** Менеджеры содержимого окна Terminal, в которых лежат вкладки плагина, — чтобы следить за переключением вкладок. */
+    fun tabContentManagers(): Set<ContentManager> = tabs.values.mapNotNullTo(HashSet()) {
+        try {
+            it.content.manager
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /**
      * Продолжить сессию. Если вкладка уже открыта нами — просто показать её.
@@ -163,6 +203,7 @@ class TerminalLauncher(private val project: Project) {
                     tab.view.coroutineScope.coroutineContext.job.invokeOnCompletion {
                         tabs.remove(sessionId, tab)
                         if (file != null) editorFiles.remove(sessionId, file)
+                        tabsChanged()
                         // Вкладку закрыли, пока проект открыт, — больше не восстанавливаем; при закрытии проекта/IDE запись остаётся.
                         // Есть другая живая вкладка той же сессии (или её успели открыть снова) — запись тоже остаётся.
                         if (tabs[sessionId] == null) {
@@ -170,6 +211,7 @@ class TerminalLauncher(private val project: Project) {
                         }
                     }
                     registered = true
+                    tabsChanged()
                 }
                 if (file == null) ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID)?.activate(null)
             } catch (e: Throwable) {
@@ -239,6 +281,10 @@ class TerminalLauncher(private val project: Project) {
         builder
     }
 
+    private fun tabsChanged() {
+        if (!project.isDisposed) project.messageBus.syncPublisher(SessionTabsListener.TOPIC).tabsChanged()
+    }
+
     private fun isAlive(tab: TerminalToolWindowTab): Boolean = try {
         tab.view.coroutineScope.isActive
     } catch (_: Throwable) {
@@ -255,5 +301,16 @@ class TerminalLauncher(private val project: Project) {
         private const val CLOSE_TIMEOUT_MS = 15_000L
         private const val TERMINAL_VIEW_FILE_CLASS = "com.intellij.terminal.frontend.editor.TerminalViewVirtualFile"
         fun get(project: Project): TerminalLauncher = project.service()
+    }
+}
+
+/** Вкладки сессий, открытые плагином, появились или закрылись. Может прийти не на EDT. */
+fun interface SessionTabsListener {
+    fun tabsChanged()
+
+    companion object {
+        @JvmField
+        @Topic.ProjectLevel
+        val TOPIC: Topic<SessionTabsListener> = Topic.create("CC Sessions terminal tabs", SessionTabsListener::class.java)
     }
 }
