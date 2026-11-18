@@ -35,6 +35,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <p><b>1.2.0</b></p>
+    <ul>
+      <li>Restores the CC Sessions panel, open session tabs (<code>claude --resume</code>) and transcripts after the IDE restarts; can be turned off in Settings → Tools → CC Sessions (<b>Restore open sessions on startup</b>).</li>
+      <li>The session whose tab is currently shown (in the editor or the Terminal tool window) is highlighted in the list, with the Finish button; switching to a session tab clears the manual list selection.</li>
+    </ul>
     <p><b>1.1.0</b></p>
     <ul>
       <li>English UI; the language follows the IDE and can be set in Settings → Tools → CC Sessions.</li>
