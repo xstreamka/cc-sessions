@@ -43,6 +43,8 @@
    ```bash
    PUBLISH_TOKEN=… ./gradlew publishPlugin
    ```
+   Вместо переменной токен можно положить в файл `~/.config/cc-sessions/publish-token` (только токен, права `600`) —
+   тогда достаточно `./gradlew publishPlugin`.
    Подпись автора необязательна (Marketplace подписывает сам). Если нужна своя — задайте `CERTIFICATE_CHAIN`,
    `PRIVATE_KEY`, `PRIVATE_KEY_PASSWORD`, и `signPlugin` подпишет сборку перед публикацией.
 

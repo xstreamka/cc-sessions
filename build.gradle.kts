@@ -37,9 +37,13 @@ intellijPlatform {
     buildSearchableOptions = false
 
     // Публикация в JetBrains Marketplace: ./gradlew publishPlugin (первую версию загружают вручную на сайте).
-    // Секреты — только из переменных окружения, в репозиторий не коммитятся.
+    // Секреты в репозиторий не коммитятся. Токен — из переменной PUBLISH_TOKEN, а если её нет —
+    // из локального файла ~/.config/cc-sessions/publish-token (только токен, права 600).
     publishing {
+        val tokenFile = layout.file(provider { File(System.getProperty("user.home"), ".config/cc-sessions/publish-token") })
         token = providers.environmentVariable("PUBLISH_TOKEN")
+            .orElse(providers.fileContents(tokenFile).asText.map { it.trim() })
+            .filter { it.isNotEmpty() }
     }
     // Подпись автора необязательна (Marketplace подписывает сам); если переменные заданы — signPlugin подпишет сборку.
     signing {
