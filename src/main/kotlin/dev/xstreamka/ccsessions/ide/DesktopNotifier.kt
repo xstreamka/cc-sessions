@@ -29,7 +29,8 @@ object DesktopNotifier {
         val command = when {
             SystemInfo.isLinux -> findInPath("notify-send")?.let {
                 val icon = iconFile()?.let { path -> listOf("-i", path.toString()) }.orEmpty()
-                listOf(it, "-a", "CC Sessions") + icon +
+                val urgency = if (CcSettings.get().notifyDesktopSticky) listOf("-u", "critical") else emptyList()
+                listOf(it, "-a", "CC Sessions") + icon + urgency +
                     listOf("-A", "$CLICK_ACTION=" + CcBundle.message("notify.action.show"), title, markupEscape(text))
             }
             SystemInfo.isMac -> listOf(

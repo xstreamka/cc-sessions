@@ -2,14 +2,17 @@ package dev.xstreamka.ccsessions.ide
 
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.dsl.builder.COLUMNS_LARGE
+import com.intellij.ui.dsl.builder.Cell
 import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
+import com.intellij.ui.layout.selectedValueMatches
 
 class CcConfigurable : BoundConfigurable("CC Sessions") {
 
@@ -53,10 +56,16 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
                 row { checkBox(CcBundle.message("settings.notify.idle")).bindSelected(s::notifyOnIdle) }
                 row { checkBox(CcBundle.message("settings.notify.permission")).bindSelected(s::notifyOnPermission) }
                 row { checkBox(CcBundle.message("settings.notify.inactive")).bindSelected(s::notifyOnlyWhenInactive) }
+                lateinit var target: Cell<ComboBox<String>>
                 row(CcBundle.message("settings.notify.target")) {
-                    comboBox(CcSettings.NOTIFY_TARGETS, textListCellRenderer { t -> t?.let { CcBundle.message("settings.notify.target.$it") } })
+                    target = comboBox(CcSettings.NOTIFY_TARGETS, textListCellRenderer { t -> t?.let { CcBundle.message("settings.notify.target.$it") } })
                         .bindItem({ CcSettings.notifyTarget() }, { s.notifyTarget = it ?: CcSettings.NOTIFY_IDE })
                         .comment(CcBundle.message("settings.notify.target.comment"))
+                }
+                row {
+                    checkBox(CcBundle.message("settings.notify.sticky")).bindSelected(s::notifyDesktopSticky)
+                        .comment(CcBundle.message("settings.notify.sticky.comment"))
+                        .enabledIf(target.component.selectedValueMatches { it != CcSettings.NOTIFY_IDE })
                 }
             }
             group(CcBundle.message("settings.group.live")) {
