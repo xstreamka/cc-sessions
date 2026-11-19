@@ -25,6 +25,8 @@ class CcSettings : SimplePersistentStateComponent<CcSettings.S>(S()) {
         var notifyOnIdle by property(true)
         var notifyOnPermission by property(true)
         var notifyOnlyWhenInactive by property(true)
+        /** Где показывать уведомления о live-статусе: [NOTIFY_IDE] | [NOTIFY_DESKTOP] | [NOTIFY_BOTH], см. [DesktopNotifier]. */
+        var notifyTarget by string(NOTIFY_IDE)
         var showAllProjects by property(false)
         var favoritesOnly by property(false)
         var hideSdkSessions by property(false)
@@ -40,6 +42,14 @@ class CcSettings : SimplePersistentStateComponent<CcSettings.S>(S()) {
     }
 
     companion object {
+        const val NOTIFY_IDE = "ide"
+        const val NOTIFY_DESKTOP = "desktop"
+        const val NOTIFY_BOTH = "both"
+        val NOTIFY_TARGETS = listOf(NOTIFY_IDE, NOTIFY_DESKTOP, NOTIFY_BOTH)
+
+        /** Где показывать уведомления; неизвестное значение — как по умолчанию, в IDE. */
+        fun notifyTarget(): String = get().notifyTarget?.takeIf { it in NOTIFY_TARGETS } ?: NOTIFY_IDE
+
         /** Каталог бэкапов из настроек (с раскрытием ~), null — рядом с settings.json. */
         fun backupDir(): java.nio.file.Path? {
             val raw = get().settingsBackupDir?.trim().orEmpty()

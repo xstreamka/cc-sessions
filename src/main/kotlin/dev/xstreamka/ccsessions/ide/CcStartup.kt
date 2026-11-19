@@ -11,8 +11,10 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.openapi.wm.WindowManager
 import dev.xstreamka.ccsessions.core.LiveStatus
 import dev.xstreamka.ccsessions.core.LiveTransition
+import java.awt.Frame
 import java.nio.file.Paths
 import java.util.concurrent.CancellationException
 
@@ -76,18 +78,47 @@ object LiveNotifier {
             "error" -> t.after.error.orEmpty()
             else -> t.after.lastMessage.orEmpty()
         }
-        val content = "<b>" + StringUtil.escapeXmlEntities(name) + "</b>" +
-            (if (details.isNotBlank()) "<br>" + StringUtil.escapeXmlEntities(StringUtil.shortenTextWithEllipsis(details, 200, 0)) else "")
         val sid = t.after.sessionId
-        NotificationGroupManager.getInstance().getNotificationGroup(CcData.NOTIFICATION_GROUP)
-            .createNotification(title, content, type)
-            .addAction(NotificationAction.createSimpleExpiring(CcBundle.message("notify.action.show")) {
-                if (!TerminalLauncher.get(project).focus(sid)) {
-                    ToolWindowManager.getInstance(project).getToolWindow(SessionsToolWindowFactory.ID)?.activate(null)
-                }
-            })
-            .addAction(NotificationAction.createSimple(CcBundle.message("notify.action.transcript")) { TranscriptEditorProvider.open(project, sid) })
-            .notify(project)
+        val shortDetails = if (details.isNotBlank()) StringUtil.shortenTextWithEllipsis(details, 200, 0) else ""
+        val showSession = {
+            if (!TerminalLauncher.get(project).focus(sid)) {
+                ToolWindowManager.getInstance(project).getToolWindow(SessionsToolWindowFactory.ID)?.activate(null)
+            }
+        }
+        val inIde = {
+            if (!project.isDisposed) {
+                val content = "<b>" + StringUtil.escapeXmlEntities(name) + "</b>" +
+                    (if (shortDetails.isNotEmpty()) "<br>" + StringUtil.escapeXmlEntities(shortDetails) else "")
+                NotificationGroupManager.getInstance().getNotificationGroup(CcData.NOTIFICATION_GROUP)
+                    .createNotification(title, content, type)
+                    .addAction(NotificationAction.createSimpleExpiring(CcBundle.message("notify.action.show")) { showSession() })
+                    .addAction(NotificationAction.createSimple(CcBundle.message("notify.action.transcript")) { TranscriptEditorProvider.open(project, sid) })
+                    .notify(project)
+            }
+        }
+        val target = CcSettings.notifyTarget()
+        if (target != CcSettings.NOTIFY_DESKTOP) inIde()
+        if (target != CcSettings.NOTIFY_IDE) {
+            DesktopNotifier.notify(
+                title, name + (if (shortDetails.isNotEmpty()) "\n" + shortDetails else ""),
+                onClick = {
+                    if (!project.isDisposed) {
+                        bringToFront(project)
+                        showSession()
+                    }
+                },
+                // Не удалось вывести на рабочий стол, а в IDE не показывали — показываем там, чтобы уведомление не потерялось
+                onFailure = { if (target == CcSettings.NOTIFY_DESKTOP) inIde() },
+            )
+        }
+    }
+
+    /** Окно проекта — поверх остальных (по клику на уведомлении рабочего стола). */
+    private fun bringToFront(project: Project) {
+        val frame = WindowManager.getInstance().getFrame(project) ?: return
+        if (frame.extendedState and Frame.ICONIFIED != 0) frame.extendedState = frame.extendedState and Frame.ICONIFIED.inv()
+        frame.toFront()
+        frame.requestFocus()
     }
 
     /** Проект, в каталоге которого (или внутри) работала сессия. */

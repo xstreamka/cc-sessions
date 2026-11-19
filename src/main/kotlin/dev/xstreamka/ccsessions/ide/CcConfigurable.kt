@@ -53,6 +53,11 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
                 row { checkBox(CcBundle.message("settings.notify.idle")).bindSelected(s::notifyOnIdle) }
                 row { checkBox(CcBundle.message("settings.notify.permission")).bindSelected(s::notifyOnPermission) }
                 row { checkBox(CcBundle.message("settings.notify.inactive")).bindSelected(s::notifyOnlyWhenInactive) }
+                row(CcBundle.message("settings.notify.target")) {
+                    comboBox(CcSettings.NOTIFY_TARGETS, textListCellRenderer { t -> t?.let { CcBundle.message("settings.notify.target.$it") } })
+                        .bindItem({ CcSettings.notifyTarget() }, { s.notifyTarget = it ?: CcSettings.NOTIFY_IDE })
+                        .comment(CcBundle.message("settings.notify.target.comment"))
+                }
             }
             group(CcBundle.message("settings.group.live")) {
                 row {
