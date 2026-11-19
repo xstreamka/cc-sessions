@@ -35,6 +35,15 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <p><b>1.3.0</b></p>
+    <ul>
+      <li>Desktop notifications: choose where to show them — in the IDE, on the desktop, or both (Settings → Tools → CC Sessions, <b>Show</b>). Linux uses <code>notify-send</code> (clicking a notification opens the session), macOS uses <code>osascript</code>; on other systems, or if a notification cannot be shown, it appears in the IDE. Optionally keep desktop notifications until you close them.</li>
+      <li>When Claude ends its turn while background agents it started are still running, the session shows <b>waiting for background agents</b> and no "Claude has finished" notification is sent for such interim results; an optional setting notifies about them under a separate title.</li>
+      <li><b>Only when the project window is not focused</b> now checks the window of the session's project: with several projects open, notifications from another project are no longer suppressed while you work in a different window.</li>
+      <li>The session list no longer scrolls horizontally: titles and details wrap to the panel width. The Finish button appears only on hover.</li>
+      <li>Clicking the empty area below the session list clears the selection.</li>
+      <li>Fixed: the subagent counter in the live status could drift.</li>
+    </ul>
     <p><b>1.2.0</b></p>
     <ul>
       <li>Restores the CC Sessions panel, open session tabs (<code>claude --resume</code>) and transcripts after the IDE restarts; can be turned off in Settings → Tools → CC Sessions (<b>Restore open sessions on startup</b>).</li>
