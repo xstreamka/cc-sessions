@@ -380,6 +380,16 @@ class SessionsPanel(
                 MouseEvent.MOUSE_ENTERED -> updateHover(e.point)
                 MouseEvent.MOUSE_EXITED -> updateHover(null)
                 MouseEvent.MOUSE_PRESSED -> {
+                    // Клик в пустое место под списком снимает выделение (JList по умолчанию выделил бы ближайшую — последнюю — строку);
+                    // остаток серии кликов глушим, чтобы двойной клик не открыл сессию, а правый — пустое меню
+                    if (rowIndexAt(e.point) < 0) {
+                        clearSelection()
+                        if (!isFocusOwner) requestFocusInWindow()
+                        swallowClicks = true
+                        pressedFinishId = null
+                        e.consume()
+                        return
+                    }
                     // Правый клик сначала выделяет строку под мышью — контекстное меню открывается для неё
                     if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger) {
                         val idx = rowIndexAt(e.point)
