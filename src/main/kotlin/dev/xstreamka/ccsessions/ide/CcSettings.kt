@@ -24,6 +24,8 @@ class CcSettings : SimplePersistentStateComponent<CcSettings.S>(S()) {
         var restoreOnStartup by property(true)
         var notifyOnIdle by property(true)
         var notifyOnPermission by property(true)
+        /** Уведомлять о промежуточном итоге: ход закончен, но фоновые агенты ещё работают (статус `LiveStatus.BACKGROUND`). */
+        var notifyOnBackground by property(false)
         var notifyOnlyWhenInactive by property(true)
         /** Где показывать уведомления о live-статусе: [NOTIFY_IDE] | [NOTIFY_DESKTOP] | [NOTIFY_BOTH], см. [DesktopNotifier]. */
         var notifyTarget by string(NOTIFY_IDE)

@@ -60,6 +60,8 @@ object LiveNotifier {
         val kind = when {
             after == LiveStatus.WAITING_PERMISSION && before != LiveStatus.WAITING_PERMISSION && st.notifyOnPermission -> "perm"
             after == LiveStatus.IDLE && before != null && before.active && st.notifyOnIdle -> "idle"
+            // только в момент конца хода, а не после разрешения, которое запрашивал фоновый агент
+            after == LiveStatus.BACKGROUND && t.before?.turnEnded == false && t.after.turnEnded && st.notifyOnBackground -> "background"
             after == LiveStatus.ERROR && st.notifyOnIdle -> "error"
             else -> return
         }
@@ -71,6 +73,7 @@ object LiveNotifier {
         val (title, type) = when (kind) {
             "perm" -> CcBundle.message("notify.live.permission") to NotificationType.WARNING
             "error" -> CcBundle.message("notify.live.error") to NotificationType.ERROR
+            "background" -> CcBundle.message("notify.live.background") to NotificationType.INFORMATION
             else -> CcBundle.message("notify.live.idle") to NotificationType.INFORMATION
         }
         val details = when (kind) {

@@ -54,6 +54,8 @@ enum class LiveStatus(private val key: String, val active: Boolean) {
     TOOL("live.status.tool", true),
     COMPACTING("live.status.compacting", true),
     WAITING_PERMISSION("live.status.waitingPermission", true),
+    /** Основной ход закончился, но запущенные им фоновые агенты ещё работают — по их итогам Claude продолжит сам. */
+    BACKGROUND("live.status.background", true),
     IDLE("live.status.idle", false),
     ERROR("live.status.error", false),
     ENDED("live.status.ended", false),
@@ -76,8 +78,13 @@ data class LiveState(
     val lastPrompt: String? = null,
     val lastMessage: String? = null,
     val error: String? = null,
-    val activeSubagents: Int = 0,
+    /** Id запущенных и ещё не остановленных субагентов (`SubagentStart` без `SubagentStop`). */
+    val runningAgents: Set<String> = emptySet(),
+    /** Основной ход закончился при работающих фоновых агентах; сбрасывается новым ходом (их итоги приходят как промпт). */
+    val turnEnded: Boolean = false,
 ) {
+    val activeSubagents: Int get() = runningAgents.size
+
     /** Статус с учётом «зависших» сессий: процесс мог быть убит без SessionEnd. */
     fun effectiveStatus(now: Long = System.currentTimeMillis(), staleAfter: Duration = Duration.ofMinutes(20)): LiveStatus =
         if (status.active && status != LiveStatus.WAITING_PERMISSION && now - updatedAt > staleAfter.toMillis()) LiveStatus.STALE
@@ -98,6 +105,16 @@ data class LiveState(
 
 /** Чистая функция перехода состояния по событию. */
 object LiveReducer {
+    /** Событие пришло позже более новых: статус уже не его, но запуск/остановку агента учесть надо, иначе id «зависнет». */
+    fun applyLate(cur: LiveState, ev: LiveEvent): LiveState {
+        val id = ev.agentId ?: return cur
+        return when (ev.event) {
+            "SubagentStart" -> cur.copy(runningAgents = cur.runningAgents + id)
+            "SubagentStop" -> cur.copy(runningAgents = cur.runningAgents - id)
+            else -> cur
+        }
+    }
+
     fun apply(prev: LiveState?, ev: LiveEvent): LiveState {
         val base = prev ?: LiveState(ev.sessionId, LiveStatus.IDLE, ev.ts, ev.ts)
         fun to(status: LiveStatus, f: (LiveState) -> LiveState = { it }): LiveState {
@@ -112,30 +129,48 @@ object LiveReducer {
             return f(s)
         }
         val fromSubagent = ev.agentId != null
+        // Работа фонового агента после конца хода — не новый ход основного: сессия остаётся «ждёт фоновых агентов»
+        val inBackground = fromSubagent && base.turnEnded
         return when (ev.event) {
-            "SessionStart" -> to(LiveStatus.IDLE) { it.copy(tool = null, toolSummary = null, error = null, activeSubagents = 0) }
-            "UserPromptSubmit" -> to(LiveStatus.WORKING) { it.copy(lastPrompt = ev.prompt ?: it.lastPrompt, tool = null, toolSummary = null, error = null) }
-            "PreToolUse" -> to(LiveStatus.TOOL) {
+            "SessionStart" -> to(LiveStatus.IDLE) {
+                // После сжатия контекста фоновые агенты живы, после запуска/resume/clear — нет
+                val agents = if (ev.kind == "compact") it.runningAgents else emptySet()
+                it.copy(tool = null, toolSummary = null, error = null, runningAgents = agents, turnEnded = false)
+            }
+            "UserPromptSubmit" -> to(LiveStatus.WORKING) {
+                it.copy(lastPrompt = ev.prompt ?: it.lastPrompt, tool = null, toolSummary = null, error = null, turnEnded = false)
+            }
+            "PreToolUse" -> if (inBackground) to(LiveStatus.BACKGROUND) { it.copy(tool = null, toolSummary = null) }
+            else to(LiveStatus.TOOL) {
                 val tool = if (fromSubagent) "${ev.agentType ?: I18n.msg("live.subagent")} › ${ev.toolName}" else ev.toolName
                 it.copy(tool = tool, toolSummary = ev.toolSummary)
             }
             "PermissionRequest" -> to(LiveStatus.WAITING_PERMISSION) { it.copy(tool = ev.toolName ?: it.tool, toolSummary = ev.toolSummary ?: it.toolSummary) }
             "PostToolUse", "PostToolUseFailure", "PermissionDenied" ->
                 if (base.status == LiveStatus.ENDED || base.status == LiveStatus.IDLE) to(base.status)
-                else to(LiveStatus.WORKING) { it.copy(tool = null, toolSummary = null) }
+                else to(if (inBackground) LiveStatus.BACKGROUND else LiveStatus.WORKING) { it.copy(tool = null, toolSummary = null) }
             "Notification" -> when (ev.kind) {
                 "permission_prompt" -> to(LiveStatus.WAITING_PERMISSION) { it.copy(lastMessage = ev.message ?: it.lastMessage) }
-                "idle_prompt" -> to(LiveStatus.IDLE)
+                "idle_prompt" -> to(if (base.turnEnded) base.status else LiveStatus.IDLE)
                 else -> to(base.status)
             }
-            "SubagentStart" -> to(if (base.status.active) base.status else LiveStatus.WORKING) { it.copy(activeSubagents = it.activeSubagents + 1) }
-            "SubagentStop" -> to(base.status) { it.copy(activeSubagents = (it.activeSubagents - 1).coerceAtLeast(0)) }
-            "Stop" -> if (fromSubagent) to(base.status)
-            else to(LiveStatus.IDLE) { it.copy(tool = null, toolSummary = null, lastMessage = ev.lastMessage ?: it.lastMessage, activeSubagents = 0) }
+            "SubagentStart" -> to(if (base.status.active) base.status else LiveStatus.WORKING) {
+                if (ev.agentId != null) it.copy(runningAgents = it.runningAgents + ev.agentId) else it
+            }
+            // Неизвестные id (служебный агент Claude Code шлёт SubagentStop без SubagentStart) ничего не меняют
+            "SubagentStop" -> to(base.status) { if (ev.agentId != null) it.copy(runningAgents = it.runningAgents - ev.agentId) else it }
+            "Stop" -> when {
+                fromSubagent -> to(base.status)
+                // Ход закончился, а фоновые агенты ещё работают — это промежуточный итог, не «Claude закончил»
+                base.runningAgents.isNotEmpty() -> to(LiveStatus.BACKGROUND) {
+                    it.copy(tool = null, toolSummary = null, lastMessage = ev.lastMessage ?: it.lastMessage, turnEnded = true)
+                }
+                else -> to(LiveStatus.IDLE) { it.copy(tool = null, toolSummary = null, lastMessage = ev.lastMessage ?: it.lastMessage) }
+            }
             "StopFailure" -> to(LiveStatus.ERROR) { it.copy(error = ev.error, tool = null, toolSummary = null) }
             "PreCompact" -> to(LiveStatus.COMPACTING)
             "PostCompact" -> to(if (ev.kind == "manual") LiveStatus.IDLE else LiveStatus.WORKING)
-            "SessionEnd" -> to(LiveStatus.ENDED) { it.copy(tool = null, toolSummary = null, activeSubagents = 0) }
+            "SessionEnd" -> to(LiveStatus.ENDED) { it.copy(tool = null, toolSummary = null, runningAgents = emptySet(), turnEnded = false) }
             else -> to(base.status)
         }
     }
@@ -181,7 +216,10 @@ class LiveTracker(
             val before = states[sid]
             var cur = before
             for (ev in batch) {
-                if (cur != null && ev.ts < cur.updatedAt) continue // запоздавшее асинхронное событие
+                if (cur != null && ev.ts < cur.updatedAt) { // запоздавшее асинхронное событие
+                    cur = LiveReducer.applyLate(cur, ev) // статус не трогаем, но учёт агентов не теряем
+                    continue
+                }
                 cur = LiveReducer.apply(cur, ev)
             }
             if (cur != null && cur != before) {

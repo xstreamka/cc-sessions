@@ -239,10 +239,11 @@ class CoreTest {
         assertEquals(LiveStatus.WAITING_PERMISSION, st!!.status)
         ev("PostToolUse", 5)
         assertEquals(LiveStatus.WORKING, st!!.status)
-        ev("SubagentStart", 6)
+        ev("SubagentStart", 6) { it.copy(agentId = "a1") }
         assertEquals(1, st!!.activeSubagents)
         ev("Stop", 7) { it.copy(agentId = "a1") } // стоп субагента не завершает ход
         assertEquals(LiveStatus.WORKING, st!!.status)
+        ev("SubagentStop", 7) { it.copy(agentId = "a1") }
         ev("Stop", 8) { it.copy(lastMessage = "Готово") }
         assertEquals(LiveStatus.IDLE, st!!.status)
         assertEquals("Готово", st!!.lastMessage)
@@ -253,6 +254,45 @@ class CoreTest {
         assertEquals(LiveStatus.ENDED, st!!.status)
         val working = LiveState("x", LiveStatus.TOOL, 0, 0)
         assertEquals(LiveStatus.STALE, working.effectiveStatus(now = 30 * 60_000L))
+    }
+
+    @Test
+    fun liveReducerBackgroundAgents() {
+        var st: LiveState? = null
+        fun ev(e: String, ts: Long, f: (LiveEvent) -> LiveEvent = { it }) {
+            st = LiveReducer.apply(st, f(LiveEvent(ts, e, "s")))
+        }
+        ev("UserPromptSubmit", 1)
+        ev("SubagentStart", 2) { it.copy(agentId = "bg", agentType = "general-purpose") }
+        // ход закончился, агент ещё работает — промежуточный итог
+        ev("Stop", 3) { it.copy(lastMessage = "Задача у исполнителя") }
+        assertEquals(LiveStatus.BACKGROUND, st!!.status)
+        assertTrue(st!!.turnEnded)
+        assertEquals("Задача у исполнителя", st!!.lastMessage)
+        // служебный SubagentStop без SubagentStart не считается
+        ev("SubagentStop", 4) { it.copy(agentId = "other") }
+        assertEquals(setOf("bg"), st!!.runningAgents)
+        // инструменты фонового агента не превращают сессию в «работает»
+        ev("PreToolUse", 5) { it.copy(agentId = "bg", toolName = "Bash") }
+        assertEquals(LiveStatus.BACKGROUND, st!!.status)
+        ev("PermissionRequest", 6) { it.copy(agentId = "bg", toolName = "Bash") }
+        assertEquals(LiveStatus.WAITING_PERMISSION, st!!.status)
+        ev("PostToolUse", 7) { it.copy(agentId = "bg") }
+        assertEquals(LiveStatus.BACKGROUND, st!!.status)
+        ev("Notification", 8) { it.copy(kind = "idle_prompt") }
+        assertEquals(LiveStatus.BACKGROUND, st!!.status)
+        ev("SubagentStop", 9) { it.copy(agentId = "bg") }
+        assertEquals(0, st!!.activeSubagents)
+        // итог агента будит Claude, следующий Stop — настоящий конец
+        ev("UserPromptSubmit", 10)
+        assertEquals(LiveStatus.WORKING, st!!.status)
+        assertFalse(st!!.turnEnded)
+        ev("Stop", 11)
+        assertEquals(LiveStatus.IDLE, st!!.status)
+        // запоздавший SubagentStop (async-хук) всё равно снимает агента
+        val late = LiveReducer.applyLate(st!!.copy(runningAgents = setOf("x")), LiveEvent(5, "SubagentStop", "s", agentId = "x"))
+        assertTrue(late.runningAgents.isEmpty())
+        assertEquals(LiveStatus.IDLE, late.status)
     }
 
     @Test
@@ -453,7 +493,7 @@ class CoreTest {
                 h.header(forked, TranscriptHtml.Options(dark = true)),
                 h.items(Transcript(emptyList(), t.summary)),
                 MarkdownExport.export(t, o = MarkdownExport.Options(includeThinking = true, maxOutputLines = 5, zone = utc)),
-                LiveState("s", LiveStatus.WAITING_PERMISSION, 0, 0, tool = "Task", activeSubagents = 2).describe(0),
+                LiveState("s", LiveStatus.WAITING_PERMISSION, 0, 0, tool = "Task", runningAgents = setOf("a1", "a2")).describe(0),
                 LiveState("s", LiveStatus.ERROR, 0, 0, error = "e").describe(0),
                 SessionSummary("1234567890").title,
             ) + DayGroup.values().map { it.title } + LiveStatus.values().map { it.label }
@@ -496,7 +536,7 @@ class CoreTest {
 
     @Test
     fun coreLabelsFollowLocale() {
-        val perm = LiveState("s", LiveStatus.WAITING_PERMISSION, 0, 0, tool = "Bash", toolSummary = "rm -rf x", activeSubagents = 2)
+        val perm = LiveState("s", LiveStatus.WAITING_PERMISSION, 0, 0, tool = "Bash", toolSummary = "rm -rf x", runningAgents = setOf("a1", "a2"))
         withLocale(java.util.Locale.ROOT) {
             assertEquals("Today", DayGroup.TODAY.title)
             assertEquals("Favorites", DayGroup.FAVORITES.title)

@@ -23,7 +23,7 @@ object CcIcons {
     val STAR = JBColor(0xE0A100, 0xF2C94C)
 
     fun colorFor(status: LiveStatus?): Color? = when (status) {
-        LiveStatus.WORKING, LiveStatus.TOOL, LiveStatus.COMPACTING -> WORKING
+        LiveStatus.WORKING, LiveStatus.TOOL, LiveStatus.COMPACTING, LiveStatus.BACKGROUND -> WORKING
         LiveStatus.WAITING_PERMISSION -> WAITING
         LiveStatus.IDLE -> READY
         LiveStatus.ERROR -> ERROR

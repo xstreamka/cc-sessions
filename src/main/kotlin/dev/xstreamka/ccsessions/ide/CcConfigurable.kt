@@ -55,6 +55,10 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
             group(CcBundle.message("settings.group.notifications")) {
                 row { checkBox(CcBundle.message("settings.notify.idle")).bindSelected(s::notifyOnIdle) }
                 row { checkBox(CcBundle.message("settings.notify.permission")).bindSelected(s::notifyOnPermission) }
+                row {
+                    checkBox(CcBundle.message("settings.notify.background")).bindSelected(s::notifyOnBackground)
+                        .comment(CcBundle.message("settings.notify.background.comment"))
+                }
                 row { checkBox(CcBundle.message("settings.notify.inactive")).bindSelected(s::notifyOnlyWhenInactive) }
                 lateinit var target: Cell<ComboBox<String>>
                 row(CcBundle.message("settings.notify.target")) {
