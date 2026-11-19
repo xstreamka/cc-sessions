@@ -15,6 +15,8 @@ import com.intellij.openapi.wm.WindowManager
 import dev.xstreamka.ccsessions.core.LiveStatus
 import dev.xstreamka.ccsessions.core.LiveTransition
 import java.awt.Frame
+import java.awt.KeyboardFocusManager
+import java.awt.Window
 import java.nio.file.Paths
 import java.util.concurrent.CancellationException
 
@@ -65,8 +67,8 @@ object LiveNotifier {
             after == LiveStatus.ERROR && st.notifyOnIdle -> "error"
             else -> return
         }
-        if (st.notifyOnlyWhenInactive && ApplicationManager.getApplication().isActive) return
         val project = projectFor(t.after.cwd) ?: return
+        if (st.notifyOnlyWhenInactive && isProjectWindowFocused(project)) return
         val summary = SessionsService.get(project).find(t.after.sessionId)
         val alias = SessionsService.get(project).meta[t.after.sessionId]?.alias
         val name = alias ?: summary?.title ?: t.after.sessionId.take(8)
@@ -114,6 +116,20 @@ object LiveNotifier {
                 onFailure = { if (target == CcSettings.NOTIFY_DESKTOP) inIde() },
             )
         }
+    }
+
+    /**
+     * В фокусе окно именно этого проекта (или его диалог). Фокус другого окна той же IDE не считается:
+     * сидя в одном проекте, уведомления о сессиях другого проекта надо видеть.
+     */
+    private fun isProjectWindowFocused(project: Project): Boolean {
+        val frame = WindowManager.getInstance().getFrame(project) ?: return ApplicationManager.getApplication().isActive
+        var w: Window? = KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
+        while (w != null) {
+            if (w === frame) return true
+            w = w.owner
+        }
+        return false
     }
 
     /** Окно проекта — поверх остальных (по клику на уведомлении рабочего стола). */
