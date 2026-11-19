@@ -43,6 +43,8 @@ import dev.xstreamka.ccsessions.core.SessionMeta
 import dev.xstreamka.ccsessions.core.SessionSummary
 import java.awt.BorderLayout
 import java.awt.Point
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -320,7 +322,22 @@ class SessionsPanel(
                 override fun intervalRemoved(e: ListDataEvent) = updateHover(mousePosition)
                 override fun contentsChanged(e: ListDataEvent) = updateHover(mousePosition)
             })
+            // Текст строк переносится по ширине: при смене ширины высоты строк надо пересчитать (JList их кеширует)
+            addComponentListener(object : ComponentAdapter() {
+                private var lastWidth = -1
+                override fun componentResized(e: ComponentEvent) {
+                    if (width == lastWidth) return
+                    lastWidth = width
+                    fixedCellHeight = 1
+                    fixedCellHeight = -1
+                    revalidate()
+                    repaint()
+                }
+            })
         }
+
+        /** Ширина списка = ширина панели: длинный текст переносится, горизонтальной прокрутки нет. */
+        override fun getScrollableTracksViewportWidth() = true
 
         fun updateHover(p: Point?) {
             val row = p?.let(::rowIndexAt) ?: -1
