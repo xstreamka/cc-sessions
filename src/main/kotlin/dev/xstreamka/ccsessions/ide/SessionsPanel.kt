@@ -398,8 +398,9 @@ class SessionsPanel(
                 MouseEvent.MOUSE_EXITED -> updateHover(null)
                 MouseEvent.MOUSE_PRESSED -> {
                     // Клик в пустое место под списком снимает выделение (JList по умолчанию выделил бы ближайшую — последнюю — строку);
-                    // остаток серии кликов глушим, чтобы двойной клик не открыл сессию, а правый — пустое меню
-                    if (rowIndexAt(e.point) < 0) {
+                    // остаток серии кликов глушим, чтобы двойной клик не открыл сессию, а правый — пустое меню.
+                    // Пустой список не трогаем: там текст-заглушка со ссылкой «Начать новую сессию», клик нужен ей
+                    if (model.size > 0 && rowIndexAt(e.point) < 0) {
                         clearSelection()
                         if (!isFocusOwner) requestFocusInWindow()
                         swallowClicks = true
