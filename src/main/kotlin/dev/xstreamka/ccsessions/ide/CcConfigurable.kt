@@ -60,6 +60,10 @@ class CcConfigurable : BoundConfigurable("CC Sessions") {
                         .comment(CcBundle.message("settings.notify.background.comment"))
                 }
                 row { checkBox(CcBundle.message("settings.notify.inactive")).bindSelected(s::notifyOnlyWhenInactive) }
+                row {
+                    checkBox(CcBundle.message("settings.notify.dismissOnFocus")).bindSelected(s::notifyDismissOnFocus)
+                        .comment(CcBundle.message("settings.notify.dismissOnFocus.comment"))
+                }
                 lateinit var target: Cell<ComboBox<String>>
                 row(CcBundle.message("settings.notify.target")) {
                     target = comboBox(CcSettings.NOTIFY_TARGETS, textListCellRenderer { t -> t?.let { CcBundle.message("settings.notify.target.$it") } })

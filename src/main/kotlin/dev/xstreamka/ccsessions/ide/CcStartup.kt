@@ -9,6 +9,7 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.startup.ProjectActivity
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.WindowManager
@@ -17,6 +18,7 @@ import dev.xstreamka.ccsessions.core.LiveTransition
 import java.awt.Frame
 import java.awt.KeyboardFocusManager
 import java.awt.Window
+import java.beans.PropertyChangeListener
 import java.nio.file.Paths
 import java.util.concurrent.CancellationException
 
@@ -45,6 +47,12 @@ class CcStartup : ProjectActivity {
 object LiveNotifier {
     @Volatile private var subscribed = false
 
+    /** Показанные, но ещё не закрытые уведомления по проектам — их убираем, когда окно проекта получает фокус. EDT. */
+    private val shown = HashMap<Project, MutableList<Shown>>()
+
+    /** Показанное уведомление: [alive] — ещё может висеть, [dismiss] — закрыть. */
+    private class Shown(val alive: () -> Boolean, val dismiss: () -> Unit)
+
     fun ensureSubscribed() {
         if (subscribed) return
         synchronized(this) {
@@ -52,7 +60,33 @@ object LiveNotifier {
             subscribed = true
             ApplicationManager.getApplication().messageBus.connect(LiveStatusService.get())
                 .subscribe(LiveStatusListener.TOPIC, LiveStatusListener { _, transitions -> transitions.forEach(::handle) })
+            val focus = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+            val listener = PropertyChangeListener { e -> (e.newValue as? Window)?.let(::windowActivated) }
+            focus.addPropertyChangeListener("activeWindow", listener)
+            Disposer.register(LiveStatusService.get()) {
+                focus.removePropertyChangeListener("activeWindow", listener)
+                shown.clear()
+            }
         }
+    }
+
+    /** Запомнить уведомление проекта, если включено закрытие по фокусу. Закрытые и истёкшие записи по пути выбрасываем. */
+    private fun track(project: Project, notification: Shown) {
+        if (!CcSettings.get().notifyDismissOnFocus) return
+        shown.keys.removeIf { it.isDisposed }
+        shown.values.forEach { list -> list.removeIf { !it.alive() } }
+        shown.values.removeIf { it.isEmpty() }
+        shown.getOrPut(project) { ArrayList() }.add(notification)
+    }
+
+    /** Окно проекта (или его диалог) стало активным — закрыть его уведомления, если это включено в настройках. */
+    private fun windowActivated(window: Window) {
+        if (!CcSettings.get().notifyDismissOnFocus || shown.isEmpty()) return
+        val project = shown.keys.firstOrNull { p ->
+            val frame = WindowManager.getInstance().getFrame(p)
+            frame != null && generateSequence(window) { it.owner }.any { it === frame }
+        } ?: return
+        shown.remove(project)?.forEach { if (it.alive()) it.dismiss() }
     }
 
     private fun handle(t: LiveTransition) {
@@ -94,17 +128,18 @@ object LiveNotifier {
             if (!project.isDisposed) {
                 val content = "<b>" + StringUtil.escapeXmlEntities(name) + "</b>" +
                     (if (shortDetails.isNotEmpty()) "<br>" + StringUtil.escapeXmlEntities(shortDetails) else "")
-                NotificationGroupManager.getInstance().getNotificationGroup(CcData.NOTIFICATION_GROUP)
+                val notification = NotificationGroupManager.getInstance().getNotificationGroup(CcData.NOTIFICATION_GROUP)
                     .createNotification(title, content, type)
                     .addAction(NotificationAction.createSimpleExpiring(CcBundle.message("notify.action.show")) { showSession() })
                     .addAction(NotificationAction.createSimple(CcBundle.message("notify.action.transcript")) { TranscriptEditorProvider.open(project, sid) })
-                    .notify(project)
+                notification.notify(project)
+                track(project, Shown({ !notification.isExpired }, notification::expire))
             }
         }
         val target = CcSettings.notifyTarget()
         if (target != CcSettings.NOTIFY_DESKTOP) inIde()
         if (target != CcSettings.NOTIFY_IDE) {
-            DesktopNotifier.notify(
+            val desktop = DesktopNotifier.notify(
                 title, name + (if (shortDetails.isNotEmpty()) "\n" + shortDetails else ""),
                 onClick = {
                     if (!project.isDisposed) {
@@ -115,6 +150,7 @@ object LiveNotifier {
                 // Не удалось вывести на рабочий стол, а в IDE не показывали — показываем там, чтобы уведомление не потерялось
                 onFailure = { if (target == CcSettings.NOTIFY_DESKTOP) inIde() },
             )
+            track(project, Shown({ desktop.alive }, desktop::dismiss))
         }
     }
 

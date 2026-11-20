@@ -18,6 +18,42 @@ import java.util.concurrent.TimeUnit
  * Остальные ОС не поддерживаются: сразу вызывается [onFailure].
  */
 object DesktopNotifier {
+    /**
+     * Показанное уведомление. [dismiss] убирает его с рабочего стола и из списка уведомлений ОС — только на Linux:
+     * GNOME закрывает уведомление лишь по запросу того, кто его создал, поэтому просим сам notify-send
+     * (по SIGINT он закрывает своё уведомление и выходит). Уведомление `osascript` программно не убрать.
+     */
+    class Handle internal constructor() {
+        @Volatile internal var process: Process? = null
+        @Volatile var dismissed = false
+            private set
+
+        /** Уведомление ещё может висеть: процесс notify-send жив или ещё не запущен. */
+        val alive: Boolean get() = !dismissed && process?.isAlive != false
+
+        fun dismiss() {
+            if (dismissed) return
+            dismissed = true
+            process?.let(::interrupt)
+        }
+
+        internal fun started(p: Process) {
+            process = p
+            if (dismissed) interrupt(p) // закрыли раньше, чем процесс успел запуститься
+        }
+
+        private fun interrupt(p: Process) {
+            if (!SystemInfo.isLinux || !p.isAlive) return
+            AppExecutorUtil.getAppExecutorService().execute {
+                try {
+                    ProcessBuilder("kill", "-INT", p.pid().toString()).redirectErrorStream(true).start().waitFor(FAIL_CHECK_MS, TimeUnit.MILLISECONDS)
+                } catch (e: Exception) {
+                    thisLogger().warn("cannot dismiss desktop notification", e)
+                }
+            }
+        }
+    }
+
     /** Сколько ждать клика: дольше notify-send не держим, уведомление к этому времени давно в истории. */
     private const val WAIT_MINUTES = 30L
     /** Если процесс завершился с ошибкой за это время — показать не удалось (нет демона уведомлений и т.п.). */
@@ -25,7 +61,8 @@ object DesktopNotifier {
     private const val CLICK_ACTION = "default"
 
     /** [onClick] и [onFailure] вызываются на EDT. */
-    fun notify(title: String, text: String, onClick: () -> Unit, onFailure: () -> Unit) {
+    fun notify(title: String, text: String, onClick: () -> Unit, onFailure: () -> Unit): Handle {
+        val handle = Handle()
         val command = when {
             SystemInfo.isLinux -> findInPath("notify-send")?.let {
                 val icon = iconFile()?.let { path -> listOf("-i", path.toString()) }.orEmpty()
@@ -39,13 +76,16 @@ object DesktopNotifier {
             else -> null
         }
         if (command == null) {
+            handle.dismiss()
             ApplicationManager.getApplication().invokeLater(onFailure)
-            return
+            return handle
         }
         AppExecutorUtil.getAppExecutorService().execute {
             try {
                 val process = ProcessBuilder(command).redirectErrorStream(true).start()
+                handle.started(process)
                 val quick = process.waitFor(FAIL_CHECK_MS, TimeUnit.MILLISECONDS)
+                if (quick && handle.dismissed) return@execute // закрыли сами — это не ошибка показа
                 if (quick && process.exitValue() != 0) {
                     thisLogger().warn("desktop notification failed (exit ${process.exitValue()}): " + process.inputStream.bufferedReader().readText().trim())
                     ApplicationManager.getApplication().invokeLater(onFailure)
@@ -56,7 +96,7 @@ object DesktopNotifier {
                     return@execute
                 }
                 // notify-send с действием печатает имя выбранного действия; клик по самому уведомлению — default
-                if (process.inputStream.bufferedReader().readText().lines().any { it.trim() == CLICK_ACTION }) {
+                if (!handle.dismissed && process.inputStream.bufferedReader().readText().lines().any { it.trim() == CLICK_ACTION }) {
                     ApplicationManager.getApplication().invokeLater(onClick)
                 }
             } catch (e: Exception) {
@@ -64,6 +104,7 @@ object DesktopNotifier {
                 ApplicationManager.getApplication().invokeLater(onFailure)
             }
         }
+        return handle
     }
 
     /**

@@ -27,6 +27,8 @@ class CcSettings : SimplePersistentStateComponent<CcSettings.S>(S()) {
         /** Уведомлять о промежуточном итоге: ход закончен, но фоновые агенты ещё работают (статус `LiveStatus.BACKGROUND`). */
         var notifyOnBackground by property(false)
         var notifyOnlyWhenInactive by property(true)
+        /** Закрывать уведомления сессий проекта (в IDE и на рабочем столе Linux), когда его окно получает фокус. */
+        var notifyDismissOnFocus by property(false)
         /** Где показывать уведомления о live-статусе: [NOTIFY_IDE] | [NOTIFY_DESKTOP] | [NOTIFY_BOTH], см. [DesktopNotifier]. */
         var notifyTarget by string(NOTIFY_IDE)
         /** Уведомления на рабочем столе не скрываются сами, пока их не закроют (Linux: срочные, `notify-send -u critical`). */
