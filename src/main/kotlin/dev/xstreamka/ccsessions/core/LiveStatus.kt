@@ -82,6 +82,10 @@ data class LiveState(
     val runningAgents: Set<String> = emptySet(),
     /** Основной ход закончился при работающих фоновых агентах; сбрасывается новым ходом (их итоги приходят как промпт). */
     val turnEnded: Boolean = false,
+    /** Когда сессию закончили командой `/clear` (`SessionEnd` с reason=clear); null — нет или её потом продолжили. */
+    val clearedAt: Long? = null,
+    /** Когда сессия начата командой `/clear` в другой (`SessionStart` с source=clear); null — запущена иначе. */
+    val startedByClearAt: Long? = null,
 ) {
     val activeSubagents: Int get() = runningAgents.size
 
@@ -135,7 +139,15 @@ object LiveReducer {
             "SessionStart" -> to(LiveStatus.IDLE) {
                 // После сжатия контекста фоновые агенты живы, после запуска/resume/clear — нет
                 val agents = if (ev.kind == "compact") it.runningAgents else emptySet()
-                it.copy(tool = null, toolSummary = null, error = null, runningAgents = agents, turnEnded = false)
+                val byClear = when (ev.kind) {
+                    "clear" -> ev.ts
+                    "compact" -> it.startedByClearAt
+                    else -> null
+                }
+                it.copy(
+                    tool = null, toolSummary = null, error = null, runningAgents = agents, turnEnded = false,
+                    clearedAt = null, startedByClearAt = byClear,
+                )
             }
             "UserPromptSubmit" -> to(LiveStatus.WORKING) {
                 it.copy(lastPrompt = ev.prompt ?: it.lastPrompt, tool = null, toolSummary = null, error = null, turnEnded = false)
@@ -170,9 +182,46 @@ object LiveReducer {
             "StopFailure" -> to(LiveStatus.ERROR) { it.copy(error = ev.error, tool = null, toolSummary = null) }
             "PreCompact" -> to(LiveStatus.COMPACTING)
             "PostCompact" -> to(if (ev.kind == "manual") LiveStatus.IDLE else LiveStatus.WORKING)
-            "SessionEnd" -> to(LiveStatus.ENDED) { it.copy(tool = null, toolSummary = null, runningAgents = emptySet(), turnEnded = false) }
+            "SessionEnd" -> to(LiveStatus.ENDED) {
+                it.copy(
+                    tool = null, toolSummary = null, runningAgents = emptySet(), turnEnded = false,
+                    clearedAt = if (ev.kind == "clear") ev.ts else null,
+                )
+            }
             else -> to(base.status)
         }
+    }
+}
+
+/**
+ * `/clear` в работающем claude: процесс тот же (та же вкладка терминала), но сессия новая. Хук сообщает об этом парой
+ * событий — `SessionEnd` (reason=clear) у старой и сразу `SessionStart` (source=clear) у новой; id старой в событии нет,
+ * поэтому пару находим по времени и папке.
+ */
+object ClearHandoff {
+    /** Насколько раньше конца старой может прийти начало новой (хуки пишут события асинхронно). */
+    private const val BEFORE_MS = 2_000L
+    /** Насколько позже конца старой может прийти начало новой. */
+    private const val AFTER_MS = 10_000L
+
+    /**
+     * Сессия, начатая командой `/clear` в [oldId], или null: [oldId] не закончена через clear, подходящей новой нет
+     * или две подходят одинаково. Сессии из [taken] (уже привязаны к своим вкладкам) не рассматриваются.
+     */
+    fun successor(oldId: String, states: Map<String, LiveState>, taken: Set<String>): String? {
+        val old = states[oldId] ?: return null
+        val clearedAt = old.clearedAt ?: return null
+        if (old.status != LiveStatus.ENDED) return null
+        val candidates = states.values.mapNotNull { s ->
+            val started = s.startedByClearAt ?: return@mapNotNull null
+            if (s.sessionId == oldId || s.sessionId in taken) return@mapNotNull null
+            if (started < clearedAt - BEFORE_MS || started > clearedAt + AFTER_MS) return@mapNotNull null
+            if (old.cwd != null && s.cwd != null && old.cwd != s.cwd) return@mapNotNull null
+            s.sessionId to Math.abs(started - clearedAt)
+        }.sortedBy { it.second }
+        if (candidates.isEmpty()) return null
+        if (candidates.size > 1 && candidates[0].second == candidates[1].second) return null
+        return candidates[0].first
     }
 }
 

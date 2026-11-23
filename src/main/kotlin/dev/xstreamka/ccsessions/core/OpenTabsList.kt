@@ -18,6 +18,13 @@ object OpenTabsList {
     fun removedAll(list: List<String>, ids: Collection<String>): List<String> =
         if (list.none { it in ids }) list else list.filter { it !in ids }
 
+    /** [list], где [old] заменён на [new] на том же месте; [old] не было — [new] в конце, как новое открытие. */
+    fun replaced(list: List<String>, old: String, new: String): List<String> = when {
+        old == new -> list
+        old !in list -> added(list, new)
+        else -> list.map { if (it == old) new else it }.distinct()
+    }
+
     /** Привести загруженный список к виду «без пустых и дублей», порядок первых вхождений сохраняется. */
     fun normalized(list: List<String>): List<String> = list.filter { it.isNotBlank() }.distinct()
 }

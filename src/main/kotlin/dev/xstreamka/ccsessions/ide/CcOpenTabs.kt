@@ -89,6 +89,9 @@ class CcOpenTabs(private val project: Project) : PersistentStateComponent<CcOpen
 
     fun sessionOpened(sessionId: String) = onEdt { sessions = OpenTabsList.added(sessions, sessionId) }
 
+    /** Во вкладке сессии [oldId] сделали `/clear` — дальше вкладка принадлежит [newId] (её и восстанавливаем). */
+    fun sessionReplaced(oldId: String, newId: String) = onEdt { sessions = OpenTabsList.replaced(sessions, oldId, newId) }
+
     /**
      * Вкладка сессии завершилась (закрыли её или процесс терминала). Во время закрытия проекта — не трогаем.
      * [stillOpen] перепроверяется на EDT: если за это время сессию снова открыли, запись остаётся.

@@ -1,6 +1,7 @@
 package dev.xstreamka.ccsessions.ide
 
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -21,6 +22,8 @@ import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
 import com.intellij.ui.content.ContentManager
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.messages.Topic
+import dev.xstreamka.ccsessions.core.ClearHandoff
+import dev.xstreamka.ccsessions.core.LiveState
 import dev.xstreamka.ccsessions.core.Shell
 import dev.xstreamka.ccsessions.core.SessionSummary
 import kotlinx.coroutines.isActive
@@ -32,6 +35,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Запускает claude во вкладках встроенного терминала (Reworked Terminal API, 2025.3+)
@@ -39,10 +43,40 @@ import java.util.concurrent.atomic.AtomicBoolean
  * По настройке вкладка переносится в область редактора — как штатное действие терминала «Move to Editor».
  */
 @Service(Service.Level.PROJECT)
-class TerminalLauncher(private val project: Project) {
+class TerminalLauncher(private val project: Project) : Disposable {
     private val tabs = ConcurrentHashMap<String, TerminalToolWindowTab>()
     /** Вкладки, перенесённые в редактор: сессия → её файл в редакторе. */
     private val editorFiles = ConcurrentHashMap<String, VirtualFile>()
+    /** Какой сессии вкладка принадлежит сейчас: после `/clear` claude в той же вкладке ведёт уже другую сессию. */
+    private val tabSessions = ConcurrentHashMap<TerminalToolWindowTab, AtomicReference<String>>()
+
+    init {
+        ApplicationManager.getApplication().messageBus.connect(this)
+            .subscribe(LiveStatusListener.TOPIC, LiveStatusListener { states, _ -> followClear(states) })
+    }
+
+    override fun dispose() {}
+
+    /**
+     * `/clear` во вкладке: claude тот же, сессия новая — вкладка (выделение в списке, восстановление после
+     * перезапуска IDE) переходит к новой сессии. Вызывается на EDT при каждом обновлении live-статусов.
+     */
+    private fun followClear(states: Map<String, LiveState>) {
+        if (tabs.isEmpty() || project.isDisposed) return
+        var changed = false
+        for ((oldId, tab) in tabs.entries.toList()) {
+            if (!isAlive(tab)) continue
+            val newId = ClearHandoff.successor(oldId, states, tabs.keys) ?: continue
+            if (!tabs.remove(oldId, tab)) continue
+            tabs[newId] = tab
+            editorFiles.remove(oldId)?.let { editorFiles[newId] = it }
+            tabSessions[tab]?.set(newId)
+            CcOpenTabs.getIfAlive(project)?.sessionReplaced(oldId, newId)
+            thisLogger().info("terminal tab moved to session $newId after /clear in $oldId")
+            changed = true
+        }
+        if (changed) tabsChanged()
+    }
 
     fun hasOpenTab(sessionId: String): Boolean = tabs[sessionId]?.let(::isAlive) == true
 
@@ -200,14 +234,19 @@ class TerminalLauncher(private val project: Project) {
                 if (sessionId != null) {
                     tabs[sessionId] = tab
                     if (file != null) editorFiles[sessionId] = file
+                    val current = AtomicReference(sessionId)
+                    tabSessions[tab] = current
                     tab.view.coroutineScope.coroutineContext.job.invokeOnCompletion {
-                        tabs.remove(sessionId, tab)
-                        if (file != null) editorFiles.remove(sessionId, file)
+                        tabSessions.remove(tab, current)
+                        // Сессия вкладки на момент закрытия — после /clear уже не та, с которой её открывали
+                        val id = current.get()
+                        tabs.remove(id, tab)
+                        if (file != null) editorFiles.remove(id, file)
                         tabsChanged()
                         // Вкладку закрыли, пока проект открыт, — больше не восстанавливаем; при закрытии проекта/IDE запись остаётся.
                         // Есть другая живая вкладка той же сессии (или её успели открыть снова) — запись тоже остаётся.
-                        if (tabs[sessionId] == null) {
-                            CcOpenTabs.ifCreated(project)?.sessionClosed(sessionId) { hasOpenTab(sessionId) }
+                        if (tabs[id] == null) {
+                            CcOpenTabs.ifCreated(project)?.sessionClosed(id) { hasOpenTab(id) }
                         }
                     }
                     registered = true

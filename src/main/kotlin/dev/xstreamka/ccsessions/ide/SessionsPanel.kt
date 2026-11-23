@@ -197,7 +197,10 @@ class SessionsPanel(
         conn.subscribe(ToolWindowManagerListener.TOPIC, object : ToolWindowManagerListener {
             override fun stateChanged(toolWindowManager: ToolWindowManager) = scheduleShownTabsUpdate()
         })
-        conn.subscribe(SessionTabsListener.TOPIC, SessionTabsListener { scheduleShownTabsUpdate() })
+        // Вкладки появились, закрылись или перешли к другой сессии (/clear) — пометки «открыта во вкладке» тоже меняются
+        conn.subscribe(SessionTabsListener.TOPIC, SessionTabsListener {
+            ApplicationManager.getApplication().invokeLater({ rebuild(); updateShownTabs() }, { project.isDisposed || disposed })
+        })
 
         service.ensureStarted()
         rebuild()
