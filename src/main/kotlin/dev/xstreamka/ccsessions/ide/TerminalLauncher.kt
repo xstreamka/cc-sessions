@@ -22,8 +22,8 @@ import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
 import com.intellij.ui.content.ContentManager
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.messages.Topic
-import dev.xstreamka.ccsessions.core.ClearHandoff
 import dev.xstreamka.ccsessions.core.LiveState
+import dev.xstreamka.ccsessions.core.SessionHandoff
 import dev.xstreamka.ccsessions.core.Shell
 import dev.xstreamka.ccsessions.core.SessionSummary
 import kotlinx.coroutines.isActive
@@ -47,7 +47,7 @@ class TerminalLauncher(private val project: Project) : Disposable {
     private val tabs = ConcurrentHashMap<String, TerminalToolWindowTab>()
     /** Вкладки, перенесённые в редактор: сессия → её файл в редакторе. */
     private val editorFiles = ConcurrentHashMap<String, VirtualFile>()
-    /** Какой сессии вкладка принадлежит сейчас: после `/clear` claude в той же вкладке ведёт уже другую сессию. */
+    /** Какой сессии вкладка принадлежит сейчас: после `/clear` или `/resume` claude в той же вкладке ведёт уже другую сессию. */
     private val tabSessions = ConcurrentHashMap<TerminalToolWindowTab, AtomicReference<String>>()
 
     init {
@@ -58,7 +58,7 @@ class TerminalLauncher(private val project: Project) : Disposable {
     override fun dispose() {}
 
     /**
-     * `/clear` во вкладке: claude тот же, сессия новая — вкладка (выделение в списке, восстановление после
+     * `/clear` или `/resume` во вкладке: claude тот же, сессия другая — вкладка (выделение в списке, восстановление после
      * перезапуска IDE) переходит к новой сессии. Вызывается на EDT при каждом обновлении live-статусов.
      */
     private fun followClear(states: Map<String, LiveState>) {
@@ -66,13 +66,13 @@ class TerminalLauncher(private val project: Project) : Disposable {
         var changed = false
         for ((oldId, tab) in tabs.entries.toList()) {
             if (!isAlive(tab)) continue
-            val newId = ClearHandoff.successor(oldId, states, tabs.keys) ?: continue
+            val newId = SessionHandoff.successor(oldId, states, tabs.keys) ?: continue
             if (!tabs.remove(oldId, tab)) continue
             tabs[newId] = tab
             editorFiles.remove(oldId)?.let { editorFiles[newId] = it }
             tabSessions[tab]?.set(newId)
             CcOpenTabs.getIfAlive(project)?.sessionReplaced(oldId, newId)
-            thisLogger().info("terminal tab moved to session $newId after /clear in $oldId")
+            thisLogger().info("terminal tab moved to session $newId after /clear or /resume in $oldId")
             changed = true
         }
         if (changed) tabsChanged()
@@ -238,7 +238,7 @@ class TerminalLauncher(private val project: Project) : Disposable {
                     tabSessions[tab] = current
                     tab.view.coroutineScope.coroutineContext.job.invokeOnCompletion {
                         tabSessions.remove(tab, current)
-                        // Сессия вкладки на момент закрытия — после /clear уже не та, с которой её открывали
+                        // Сессия вкладки на момент закрытия — после /clear или /resume уже не та, с которой её открывали
                         val id = current.get()
                         tabs.remove(id, tab)
                         if (file != null) editorFiles.remove(id, file)

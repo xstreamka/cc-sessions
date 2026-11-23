@@ -82,10 +82,10 @@ data class LiveState(
     val runningAgents: Set<String> = emptySet(),
     /** Основной ход закончился при работающих фоновых агентах; сбрасывается новым ходом (их итоги приходят как промпт). */
     val turnEnded: Boolean = false,
-    /** Когда сессию закончили командой `/clear` (`SessionEnd` с reason=clear); null — нет или её потом продолжили. */
-    val clearedAt: Long? = null,
-    /** Когда сессия начата командой `/clear` в другой (`SessionStart` с source=clear); null — запущена иначе. */
-    val startedByClearAt: Long? = null,
+    /** Сессию сменили на другую в том же claude (`/clear`, `/resume`); null — нет или её потом продолжили. */
+    val switchedOut: SessionSwitch? = null,
+    /** Сессия начата сменой другой сессии в том же claude (`/clear`, `/resume`); null — запущена иначе. */
+    val switchedIn: SessionSwitch? = null,
 ) {
     val activeSubagents: Int get() = runningAgents.size
 
@@ -139,14 +139,14 @@ object LiveReducer {
             "SessionStart" -> to(LiveStatus.IDLE) {
                 // После сжатия контекста фоновые агенты живы, после запуска/resume/clear — нет
                 val agents = if (ev.kind == "compact") it.runningAgents else emptySet()
-                val byClear = when (ev.kind) {
-                    "clear" -> ev.ts
-                    "compact" -> it.startedByClearAt
+                val switchedIn = when (ev.kind) {
+                    in SessionHandoff.KINDS -> SessionSwitch(ev.kind!!, ev.ts)
+                    "compact" -> it.switchedIn
                     else -> null
                 }
                 it.copy(
                     tool = null, toolSummary = null, error = null, runningAgents = agents, turnEnded = false,
-                    clearedAt = null, startedByClearAt = byClear,
+                    switchedOut = null, switchedIn = switchedIn,
                 )
             }
             "UserPromptSubmit" -> to(LiveStatus.WORKING) {
@@ -185,7 +185,7 @@ object LiveReducer {
             "SessionEnd" -> to(LiveStatus.ENDED) {
                 it.copy(
                     tool = null, toolSummary = null, runningAgents = emptySet(), turnEnded = false,
-                    clearedAt = if (ev.kind == "clear") ev.ts else null,
+                    switchedOut = if (ev.kind in SessionHandoff.KINDS) SessionSwitch(ev.kind!!, ev.ts) else null,
                 )
             }
             else -> to(base.status)
@@ -193,31 +193,38 @@ object LiveReducer {
     }
 }
 
+/** Смена сессии внутри одного claude: [kind] — `clear` или `resume`, [at] — время события хука. */
+data class SessionSwitch(val kind: String, val at: Long)
+
 /**
- * `/clear` в работающем claude: процесс тот же (та же вкладка терминала), но сессия новая. Хук сообщает об этом парой
- * событий — `SessionEnd` (reason=clear) у старой и сразу `SessionStart` (source=clear) у новой; id старой в событии нет,
- * поэтому пару находим по времени и папке.
+ * `/clear` или `/resume` в работающем claude: процесс тот же (та же вкладка терминала), но сессия другая. Хук сообщает
+ * об этом парой событий — `SessionEnd` (reason=clear|resume) у прежней и сразу `SessionStart` (source с тем же значением)
+ * у новой; id прежней в событии нет, поэтому пару находим по виду смены, времени и папке. Обычный выход из claude
+ * приходит с другой причиной (prompt_input_exit, other), а `claude --resume` в новом процессе — без парного SessionEnd.
  */
-object ClearHandoff {
-    /** Насколько раньше конца старой может прийти начало новой (хуки пишут события асинхронно). */
+object SessionHandoff {
+    /** Причины SessionEnd / источники SessionStart, означающие смену сессии внутри одного claude. */
+    val KINDS = setOf("clear", "resume")
+
+    /** Насколько раньше конца прежней может прийти начало новой (хуки пишут события асинхронно). */
     private const val BEFORE_MS = 2_000L
-    /** Насколько позже конца старой может прийти начало новой. */
+    /** Насколько позже конца прежней может прийти начало новой. */
     private const val AFTER_MS = 10_000L
 
     /**
-     * Сессия, начатая командой `/clear` в [oldId], или null: [oldId] не закончена через clear, подходящей новой нет
-     * или две подходят одинаково. Сессии из [taken] (уже привязаны к своим вкладкам) не рассматриваются.
+     * Сессия, на которую claude переключился с [oldId] (`/clear`, `/resume`), или null: [oldId] не закончена сменой,
+     * подходящей новой нет или две подходят одинаково. Сессии из [taken] (уже привязаны к своим вкладкам) не рассматриваются.
      */
     fun successor(oldId: String, states: Map<String, LiveState>, taken: Set<String>): String? {
         val old = states[oldId] ?: return null
-        val clearedAt = old.clearedAt ?: return null
+        val out = old.switchedOut ?: return null
         if (old.status != LiveStatus.ENDED) return null
         val candidates = states.values.mapNotNull { s ->
-            val started = s.startedByClearAt ?: return@mapNotNull null
-            if (s.sessionId == oldId || s.sessionId in taken) return@mapNotNull null
-            if (started < clearedAt - BEFORE_MS || started > clearedAt + AFTER_MS) return@mapNotNull null
+            val inn = s.switchedIn ?: return@mapNotNull null
+            if (inn.kind != out.kind || s.sessionId == oldId || s.sessionId in taken) return@mapNotNull null
+            if (inn.at < out.at - BEFORE_MS || inn.at > out.at + AFTER_MS) return@mapNotNull null
             if (old.cwd != null && s.cwd != null && old.cwd != s.cwd) return@mapNotNull null
-            s.sessionId to Math.abs(started - clearedAt)
+            s.sessionId to Math.abs(inn.at - out.at)
         }.sortedBy { it.second }
         if (candidates.isEmpty()) return null
         if (candidates.size > 1 && candidates[0].second == candidates[1].second) return null
