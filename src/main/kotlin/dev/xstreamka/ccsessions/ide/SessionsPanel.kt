@@ -145,6 +145,7 @@ class SessionsPanel(
             SessionActions.ToggleFavorite(),
             SessionActions.ToggleArchive(),
             SessionActions.EditTags(),
+            SessionActions.MoveToProject(),
             Separator.getInstance(),
             SessionActions.CopyId(),
             SessionActions.CopyResumeCommand(),

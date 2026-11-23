@@ -6,6 +6,8 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -14,6 +16,12 @@ import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.ListSeparator
+import com.intellij.openapi.ui.popup.PopupStep
+import com.intellij.openapi.ui.popup.util.BaseListPopupStep
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.notification.NotificationType
@@ -26,12 +34,16 @@ import dev.xstreamka.ccsessions.core.LiveStatus
 import dev.xstreamka.ccsessions.core.MarkdownExport
 import dev.xstreamka.ccsessions.core.SessionFiles
 import dev.xstreamka.ccsessions.core.SessionMeta
+import dev.xstreamka.ccsessions.core.SessionMove
+import dev.xstreamka.ccsessions.core.ClaudePaths
 import dev.xstreamka.ccsessions.core.SessionSummary
 import dev.xstreamka.ccsessions.core.Shell
 import dev.xstreamka.ccsessions.core.TranscriptParser
 import org.jetbrains.annotations.PropertyKey
 import java.awt.datatransfer.StringSelection
 import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.function.Supplier
 import javax.swing.Icon
 
@@ -288,6 +300,117 @@ object SessionActions {
                     CcData.notify(project, CcBundle.message("notify.deleteFailed"), e.message ?: e.javaClass.simpleName, NotificationType.ERROR)
                 }
                 SessionsService.get(project).requestRefresh()
+            }
+        }
+    }
+
+    /**
+     * Перенести сессию в другой проект (см. [SessionMove]): на выбор открытые проекты, проекты, где уже были
+     * сессии Claude, и любая папка. Работающую или открытую во вкладке сессию не трогаем — Claude дописывает её файл.
+     */
+    class MoveToProject : RowAction("cc.action.move", "cc.action.move.description") {
+        override fun perform(project: Project, row: SessionRow) {
+            val busy = row.liveStatus?.active == true ||
+                ProjectManager.getInstance().openProjects.any { !it.isDisposed && TerminalLauncher.get(it).hasOpenTab(row.id) }
+            if (busy) {
+                Messages.showWarningDialog(project, CcBundle.message("dialog.move.busy"), CcBundle.message("dialog.move.title"))
+                return
+            }
+            val transcript = row.summary.file
+            if (transcript == null || !Files.isRegularFile(transcript)) {
+                Messages.showInfoMessage(project, I18n.msg("error.move.noTranscript"), CcBundle.message("dialog.move.title"))
+                return
+            }
+            AppExecutorUtil.getAppExecutorService().execute {
+                val from = SessionMove.sourceRoot(transcript) ?: row.summary.cwd ?: project.basePath ?: return@execute
+                val targets = moveTargets(transcript, from)
+                ApplicationManager.getApplication().invokeLater {
+                    if (!project.isDisposed) chooseTarget(project, row, transcript, from, targets)
+                }
+            }
+        }
+
+        private class Target(val path: String, val open: Boolean)
+
+        /** Открытые проекты, затем проекты с сессиями Claude (свежие выше); без проекта самой сессии и пропавших папок. */
+        private fun moveTargets(transcript: Path, from: String): List<Target> {
+            val skip = ClaudePaths.encodeProjectDir(from)
+            val seen = HashSet<String>()
+            val result = ArrayList<Target>()
+            fun add(path: String, open: Boolean) {
+                val key = ClaudePaths.encodeProjectDir(path)
+                if (key != skip && seen.add(key) && Files.isDirectory(Paths.get(path))) result += Target(path, open)
+            }
+            ProjectManager.getInstance().openProjects.filter { !it.isDisposed }
+                .mapNotNull { it.basePath }.forEach { add(FileUtil.toSystemDependentName(it), true) }
+            val sourceDir = transcript.parent
+            CcData.paths.allProjectDirs()
+                .filter { it != sourceDir }
+                .sortedByDescending { runCatching { Files.getLastModifiedTime(it).toMillis() }.getOrDefault(0L) }
+                .forEach { dir -> SessionMove.projectRootOf(dir)?.let { add(it, false) } }
+            return result
+        }
+
+        private fun chooseTarget(project: Project, row: SessionRow, transcript: Path, from: String, targets: List<Target>) {
+            val other = Target("", false)
+            val home = System.getProperty("user.home")
+            val step = object : BaseListPopupStep<Target>(CcBundle.message("popup.move.title"), targets + other) {
+                override fun getTextFor(value: Target): String {
+                    if (value === other) return CcBundle.message("popup.move.other")
+                    val shown = if (value.path.startsWith(home)) "~" + value.path.substring(home.length) else value.path
+                    return if (value.open) CcBundle.message("popup.move.open", shown) else shown
+                }
+                override fun getIconFor(value: Target): Icon? = when {
+                    value === other -> AllIcons.Nodes.Folder
+                    value.open -> AllIcons.Nodes.IdeaProject
+                    else -> AllIcons.Nodes.Folder
+                }
+                override fun getSeparatorAbove(value: Target): ListSeparator? = if (value === other && targets.isNotEmpty()) ListSeparator() else null
+                override fun isSpeedSearchEnabled() = true
+                override fun onChosen(selectedValue: Target, finalChoice: Boolean): PopupStep<*>? {
+                    doFinalStep {
+                        if (selectedValue === other) {
+                            val descriptor = FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                                .withTitle(CcBundle.message("chooser.move.title"))
+                            FileChooser.chooseFile(descriptor, project, null) { vf ->
+                                confirmAndMove(project, row, transcript, from, FileUtil.toSystemDependentName(vf.path))
+                            }
+                        } else {
+                            confirmAndMove(project, row, transcript, from, selectedValue.path)
+                        }
+                    }
+                    return PopupStep.FINAL_CHOICE
+                }
+            }
+            JBPopupFactory.getInstance().createListPopup(step).showCenteredInCurrentWindow(project)
+        }
+
+        private fun confirmAndMove(project: Project, row: SessionRow, transcript: Path, from: String, to: String) {
+            val paths = CcData.paths
+            val dir = SessionMove.targetDir(paths, to)
+            if (dir == null || ClaudePaths.encodeProjectDir(to) == ClaudePaths.encodeProjectDir(from)) {
+                val reason = if (dir == null) I18n.msg("error.move.pathTooLong", to) else I18n.msg("error.move.sameProject")
+                Messages.showWarningDialog(project, reason, CcBundle.message("dialog.move.title"))
+                return
+            }
+            val shownDir = dir.toString().replaceFirst(System.getProperty("user.home"), "~")
+            val answer = Messages.showOkCancelDialog(
+                project,
+                CcBundle.message("dialog.move.message", row.displayTitle, to, shownDir),
+                CcBundle.message("dialog.move.title"), CcBundle.message("button.move"), CcBundle.message("button.cancel"),
+                Messages.getQuestionIcon(),
+            )
+            if (answer != Messages.OK) return
+            ProjectManager.getInstance().openProjects.filter { !it.isDisposed }.forEach { TranscriptEditorProvider.close(it, row.id) }
+            AppExecutorUtil.getAppExecutorService().execute {
+                try {
+                    SessionMove.move(paths, row.id, transcript, from, to)
+                    CcData.notify(project, CcBundle.message("notify.moved"), CcBundle.message("notify.moved.content", row.displayTitle, to))
+                } catch (e: Exception) {
+                    thisLogger().warn("cannot move session ${row.id}", e)
+                    CcData.notify(project, CcBundle.message("notify.moveFailed"), e.message ?: e.javaClass.simpleName, NotificationType.ERROR)
+                }
+                ProjectManager.getInstance().openProjects.filter { !it.isDisposed }.forEach { SessionsService.get(it).requestRefresh() }
             }
         }
     }
